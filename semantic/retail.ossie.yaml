@@ -1,0 +1,449 @@
+version: "0.2.0.dev0"
+semantic_model:
+  - name: sahara_retail
+    description: >
+      Semantic model for Sahara Retail's order/fulfillment data. Encodes the
+      governed definitions of revenue, margin, and returns so that queries
+      produce consistent answers regardless of who or what writes the SQL.
+    ai_context: >
+      This model resolves 5 known pitfalls in this schema: (1) product price
+      changes over time, so use the transaction-time price on order_items,
+      never the current price; (2) customer segment changes over time, use
+      the segment valid at the order's date; (3) partial returns are tracked
+      at the order-item line grain and do not change orders.status, so net
+      them out explicitly; (4) orders are placed in local currency and must
+      be converted to EUR via fx_rate_to_eur; (5) shipments is a fulfillment-
+      tracking table only and must never sit on the join path to order_items.
+
+    datasets:
+      - name: customers
+        source: main.customers
+        primary_key: [customer_id]
+        description: One row per customer, identity attributes only.
+        fields:
+          - name: customer_id
+            datatype: Integer
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: customer_id
+          - name: country
+            datatype: String
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: country
+          - name: signup_date
+            datatype: Date
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: signup_date
+
+      - name: customer_segment_history
+        source: main.customer_segment_history
+        primary_key: [customer_id, valid_from]
+        description: Point-in-time history of each customer's segment (standard/VIP).
+        ai_context: >
+          This is a point-in-time (SCD Type 2) table, not a 1:1 dimension on
+          customers. A customer's segment "at the time of an order" must be
+          looked up via valid_from <= order_date AND (valid_to IS NULL OR
+          order_date < valid_to) — never assume a customer's current segment
+          applied to their historical orders.
+        fields:
+          - name: customer_id
+            datatype: Integer
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: customer_id
+          - name: segment
+            datatype: String
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: segment
+          - name: valid_from
+            datatype: Date
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: valid_from
+          - name: valid_to
+            datatype: Date
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: valid_to
+
+      - name: products
+        source: main.products
+        primary_key: [product_id]
+        description: One row per product, identity attributes only.
+        fields:
+          - name: product_id
+            datatype: Integer
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: product_id
+          - name: category
+            datatype: String
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: category
+
+      - name: product_price_history
+        source: main.product_price_history
+        primary_key: [product_id, valid_from]
+        description: Point-in-time history of each product's price and cost.
+        ai_context: >
+          Point-in-time (SCD Type 2) table. Do NOT use this table to price a
+          transaction — order_items.unit_price/unit_cost already store the
+          price actually paid at sale time (the correct snapshot). This
+          table exists for questions specifically about price history or
+          the current catalog price, not for revenue/margin computation.
+        fields:
+          - name: product_id
+            datatype: Integer
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: product_id
+          - name: unit_price
+            datatype: Decimal
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: unit_price
+          - name: unit_cost
+            datatype: Decimal
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: unit_cost
+          - name: valid_from
+            datatype: Date
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: valid_from
+          - name: valid_to
+            datatype: Date
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: valid_to
+
+      - name: orders
+        source: main.orders
+        primary_key: [order_id]
+        description: Order header — one row per order.
+        fields:
+          - name: order_id
+            datatype: Integer
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: order_id
+          - name: customer_id
+            datatype: Integer
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: customer_id
+          - name: order_date
+            datatype: Date
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: order_date
+          - name: country
+            datatype: String
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: country
+          - name: currency
+            datatype: String
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: currency
+          - name: fx_rate_to_eur
+            datatype: Decimal
+            description: FX rate to EUR captured on order_date. 1.0 for EUR orders.
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: fx_rate_to_eur
+          - name: status
+            datatype: String
+            description: >
+              "completed" or "cancelled" only. Partial returns do NOT change
+              this field — a completed order can still have returned lines.
+              See order_items_to_returns relationship.
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: status
+
+      - name: order_items
+        source: main.order_items
+        primary_key: [order_item_id]
+        description: >
+          Order line fact. unit_price/unit_cost are the price actually paid
+          at sale time (already snapshotted from product_price_history as of
+          order_date) — this is the correct source for revenue/margin, not
+          product_price_history.
+        fields:
+          - name: order_item_id
+            datatype: Integer
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: order_item_id
+          - name: order_id
+            datatype: Integer
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: order_id
+          - name: product_id
+            datatype: Integer
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: product_id
+          - name: quantity
+            datatype: Integer
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: quantity
+          - name: unit_price
+            datatype: Decimal
+            description: Price actually paid per unit, local currency, at sale time.
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: unit_price
+          - name: unit_cost
+            datatype: Decimal
+            description: Cost per unit, local currency, at sale time.
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: unit_cost
+          - name: line_discount_pct
+            datatype: Decimal
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: line_discount_pct
+
+      - name: returns
+        source: main.returns
+        primary_key: [return_id]
+        description: >
+          Partial, line-grain return events. Not every order_item has a row
+          here — absence means nothing returned on that line.
+        fields:
+          - name: return_id
+            datatype: Integer
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: return_id
+          - name: order_item_id
+            datatype: Integer
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: order_item_id
+          - name: quantity_returned
+            datatype: Integer
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: quantity_returned
+          - name: return_date
+            datatype: Date
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: return_date
+
+      - name: shipments
+        source: main.shipments
+        primary_key: [shipment_id]
+        description: Fulfillment tracking only — one order can have multiple shipments.
+        ai_context: >
+          Do NOT join shipments when computing order or line-item metrics.
+          An order with split fulfillment has multiple shipment rows; joining
+          orders -> shipments -> order_items duplicates every line-item row
+          once per shipment, silently inflating any SUM() over order_items
+          or revenue/margin. Use shipments only for fulfillment-specific
+          questions (e.g. "how many shipments went to Belgium"), joined
+          directly to orders and nothing else.
+        fields:
+          - name: shipment_id
+            datatype: Integer
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: shipment_id
+          - name: order_id
+            datatype: Integer
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: order_id
+          - name: carrier
+            datatype: String
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: carrier
+
+    relationships:
+      - name: orders_to_customers
+        from: orders
+        to: customers
+        from_columns: [customer_id]
+        to_columns: [customer_id]
+
+      - name: order_items_to_orders
+        from: order_items
+        to: orders
+        from_columns: [order_id]
+        to_columns: [order_id]
+
+      - name: order_items_to_products
+        from: order_items
+        to: products
+        from_columns: [product_id]
+        to_columns: [product_id]
+
+      - name: order_items_to_returns
+        from: order_items
+        to: returns
+        from_columns: [order_item_id]
+        to_columns: [order_item_id]
+        ai_context: >
+          Nullable — not every order_item has a matching returns row. Use a
+          LEFT JOIN and COALESCE(returns.quantity_returned, 0) when netting
+          revenue/margin, so lines with no return are treated as 0 returned.
+
+      - name: orders_to_shipments
+        from: orders
+        to: shipments
+        from_columns: [order_id]
+        to_columns: [order_id]
+        ai_context: >
+          shipments is for fulfillment tracking only — do not join through
+          shipments to compute order or line-item metrics; joining
+          orders -> shipments -> order_items will duplicate line-item rows
+          once per shipment. The revenue/margin/order_count/average_order_value
+          metrics below never use this relationship.
+
+      - name: product_price_history_to_products
+        from: product_price_history
+        to: products
+        from_columns: [product_id]
+        to_columns: [product_id]
+        ai_context: >
+          product_price_history is a point-in-time table, not a 1:1 dimension.
+          Filter to the relevant date (valid_from <= date < COALESCE(valid_to,
+          '9999-12-31')) rather than joining as if one row exists per product.
+
+      - name: customer_segment_history_to_customers
+        from: customer_segment_history
+        to: customers
+        from_columns: [customer_id]
+        to_columns: [customer_id]
+        ai_context: >
+          customer_segment_history is a point-in-time table, not a 1:1
+          dimension. Filter to the relevant date rather than joining as if
+          one row exists per customer.
+
+    metrics:
+      - name: revenue
+        description: >
+          Net revenue in EUR: order-line value, netted for partial returns,
+          net of line discount, converted to EUR at the order's FX rate.
+          Only completed orders count. Resolves Traps 1 (uses order_items'
+          transaction-time price, never product_price_history), 3 (nets
+          returns.quantity_returned at line grain regardless of order
+          status), and 4 (applies fx_rate_to_eur). Joins order_items ->
+          orders and order_items -> returns only — never through shipments
+          (Trap 5).
+        filters:
+          - orders.status = 'completed'
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: >
+                SUM(
+                  (order_items.quantity - COALESCE(returns.quantity_returned, 0))
+                  * order_items.unit_price
+                  * (1 - order_items.line_discount_pct)
+                  * orders.fx_rate_to_eur
+                )
+
+      - name: net_cost
+        description: >
+          Net cost in EUR, same netting/FX logic as revenue but using
+          order_items.unit_cost. Intermediate metric used to compute margin.
+        filters:
+          - orders.status = 'completed'
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: >
+                SUM(
+                  (order_items.quantity - COALESCE(returns.quantity_returned, 0))
+                  * order_items.unit_cost
+                  * (1 - order_items.line_discount_pct)
+                  * orders.fx_rate_to_eur
+                )
+
+      - name: margin
+        description: >
+          Net margin fraction: (revenue - net_cost) / revenue, using the
+          same completed-order filter, return-netting, and FX conversion as
+          the revenue metric.
+        filters:
+          - orders.status = 'completed'
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: (revenue - net_cost) / NULLIF(revenue, 0)
+
+      - name: order_count
+        description: Count of distinct completed orders.
+        filters:
+          - orders.status = 'completed'
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: COUNT(DISTINCT orders.order_id)
+
+      - name: average_order_value
+        description: revenue / order_count, both defined above (completed orders only).
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: revenue / NULLIF(order_count, 0)
+
+      - name: return_rate
+        description: >
+          Fraction of ordered quantity that was returned:
+          SUM(returns.quantity_returned) / SUM(order_items.quantity).
+          Not currency-denominated, so no FX conversion applies.
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: >
+                SUM(COALESCE(returns.quantity_returned, 0)) * 1.0 / SUM(order_items.quantity)

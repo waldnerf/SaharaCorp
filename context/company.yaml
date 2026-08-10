@@ -1,0 +1,62 @@
+company:
+  name: "Sahara Retail"
+  industry: specialty_retail
+  launch_date: "2024-01-01"
+
+  markets:
+    - country: France
+      currency: EUR
+    - country: Germany
+      currency: EUR
+    - country: Belgium
+      currency: EUR
+    - country: Switzerland
+      currency: CHF
+
+  currency_note: >
+    Switzerland is deliberately non-Eurozone (CHF) alongside the three EUR
+    markets, so that revenue reporting across all four markets requires
+    currency conversion at transaction time (fx_rate_to_eur captured on
+    orders.order_date) rather than a naive same-currency sum.
+
+  value_proposition:
+    - curated_products
+    - fast_delivery
+
+  objectives:
+    - profitable_growth
+    - customer_retention
+
+  kpis:
+    - revenue
+    - margin
+    - return_rate
+    - vip_customer_share
+
+  priorities:
+    - name: reduce_return_rate_in_underperforming_markets
+      description: >
+        Return rates vary meaningfully by market; management wants
+        fulfillment issues in underperforming markets identified and
+        addressed before they erode net revenue.
+    - name: grow_vip_segment
+      description: >
+        Grow the share of revenue coming from VIP-segment customers,
+        who have historically ordered more frequently and returned less.
+
+  narrative_anchor: >
+    Sahara Retail's France operation experienced a fulfillment delay in
+    one quarter of the observed period, driving a spike in partial
+    product returns (see returns table, Trap 3). This is the concrete
+    instance of the reduce_return_rate_in_underperforming_markets
+    priority above: net revenue in France declined that quarter not
+    because gross demand fell, but because more of what was ordered
+    came back. Order status stays "completed" for these orders — the
+    decline is only visible once returned quantity is netted out at
+    the line-item level, not by filtering on order status alone.
+
+  data_period:
+    start: "2024-07-01"
+    end: "2025-12-31"
+    anomaly_quarter: "2025-Q3"
+    anomaly_market: France
