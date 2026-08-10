@@ -44,9 +44,11 @@ Design one coherent synthetic retail company (business model → schema → data
 ### New Files to Create
 
 - `pyproject.toml` — Python project config: dependencies (`duckdb`, `faker`, `pytest`, `ruff`), Python `>=3.11`
-- `scripts/generate_data.py` — generates `data/retail.duckdb` from the business model, with a fixed seed for reproducibility
+- `scripts/lib/synthetic_traps.py` — **domain-agnostic** reusable library implementing the 5 trap mechanisms (SCD Type 2 history, point-in-time snapshot lookup, child-grain reversal, FX-rate generation, auxiliary fan-out fact) as parameterized functions with no retail-specific table/column names baked in — this is the reusable unit a future domain (or a future Phase 3 generation skill) calls into
+- `scripts/generate_data.py` — the retail-specific **recipe**: defines retail's tables/columns and calls into `scripts/lib/synthetic_traps.py` for each trap; generates `data/retail.duckdb` from the business model, with a fixed seed for reproducibility
 - `scripts/verify_expected.py` — runs each SQL query from `evals/expected.md` against `data/retail.duckdb` and prints results, so expected answers are always derived from real query execution, not typed by hand
-- `tests/test_generated_data.py` — pytest sanity checks on the generated dataset (row counts, referential integrity, presence of the deliberate anomaly)
+- `tests/test_synthetic_traps.py` — pytest unit tests for the library **in isolation**, using a throwaway toy domain (not retail) to prove the functions are actually domain-agnostic and not accidentally coupled to retail's shape
+- `tests/test_generated_data.py` — pytest sanity checks on the generated retail dataset (row counts, referential integrity, presence of the deliberate anomaly)
 - `context/company.yaml` — the business model seed artifact (industry, markets, value proposition, objectives)
 - `context/glossary.md` — plain-language business term definitions (Condition B)
 - `semantic/retail.ossie.yaml` — Ossie-standard semantic model (Condition C)
@@ -157,13 +159,31 @@ Execute in order, top to bottom.
 
 ### CREATE `context/company.yaml`
 
-- **IMPLEMENT**: business model seed — `company.industry: specialty_retail`, `company.markets: [France, Germany, Belgium, Switzerland]`, `company.currency_note: "Switzerland uses CHF; all other markets use EUR"`, `company.value_proposition: [curated_products, fast_delivery]`, `company.objectives: [profitable_growth, customer_retention]`
+- **IMPLEMENT**: business model seed — `company.industry: specialty_retail`, `company.markets: [France, Germany, Belgium, Switzerland]`, `company.currency_note: "Switzerland uses CHF; all other markets use EUR"`, `company.value_proposition: [curated_products, fast_delivery]`, `company.objectives: [profitable_growth, customer_retention]`, `company.kpis: [revenue, margin, return_rate, vip_customer_share]`, `company.priorities: [reduce_return_rate_in_underperforming_markets, grow_vip_segment]`
 - **GOTCHA**: this file is read by a human at generation time, not by the agent under test in any condition — it seeds schema/data design, it is not one of the three condition files
+- **FORWARD-COMPATIBILITY**: write `objectives`/`kpis`/`priorities` at the level of detail a real `business/` context file (PRD §6 business context layer) would need, even though this file plays no role in Conditions A/B/C. The France-anomaly narrative should trace directly to one of these priorities (e.g. `reduce_return_rate_in_underperforming_markets`) so Phase 2/3 can lift this content into a proper business-context artifact largely as-is, rather than rewriting it from scratch.
 - **VALIDATE**: `python -c "import yaml; yaml.safe_load(open('context/company.yaml'))"`
+
+### CREATE `scripts/lib/synthetic_traps.py`
+
+- **IMPLEMENT**: a domain-agnostic library, importable by any future domain recipe, exposing:
+  - `generate_scd2_history(entity_ids, value_generator_fn, transition_rate, start_date, end_date, rng) -> list[dict]` — produces `{entity_id, valid_from, valid_to, **attrs}` rows for a slowly-changing attribute (used for both `product_price_history` and `customer_segment_history` in the retail recipe — Traps 1 & 2 are the *same function*, called twice with different `value_generator_fn`/`transition_rate`)
+  - `snapshot_as_of(history_rows, entity_id, as_of_date) -> dict` — point-in-time lookup (`valid_from <= as_of_date < COALESCE(valid_to, max_date)`), used both by the recipe when generating transaction rows and available for reuse in verification/eval code
+  - `generate_child_reversal(parent_rows, reversal_rate, reversal_amount_fn, rng, anomaly_subset=None, anomaly_rate=None) -> list[dict]` — produces partial-reversal rows against a parent fact at child grain (used for `returns`, Trap 3); `anomaly_subset`/`anomaly_rate` let a caller inject an elevated-rate anomaly for a specific subset (e.g. one country × one quarter) without a separate code path
+  - `generate_fx_rates(currencies, base_currency, date_range, rng, noise_pct=0.02) -> dict[(currency, date), float]` — plausible FX rates with small realistic noise (Trap 4); `base_currency` rate is always `1.0`
+  - `generate_fanout_fact(parent_ids, min_children, max_children, multi_rate, rng) -> list[dict]` — produces `{parent_id, child_id}` rows for an auxiliary 1:N fact where a `multi_rate` fraction of parents get 2+ children (used for `shipments`, Trap 5)
+- **GOTCHA**: none of these functions may reference `customer`, `product`, `order`, or any retail-specific name — they operate on generic `entity_id`/`parent_id`/dict-of-attributes only. If a retail-specific name leaks into this file, the reusability goal is broken.
+- **PATTERN**: pure functions taking an explicit `rng` (e.g. `random.Random(seed)` instance, not global `random.seed()`) so the retail recipe and future domain recipes can each seed independently without interfering with each other
+- **VALIDATE**: `python -c "from scripts.lib.synthetic_traps import generate_scd2_history, snapshot_as_of, generate_child_reversal, generate_fx_rates, generate_fanout_fact"`
+
+### CREATE `tests/test_synthetic_traps.py`
+
+- **IMPLEMENT**: unit tests against a toy domain that is **not** retail (e.g. generic `widget`/`owner` entities) to prove the library has no retail coupling: SCD2 history produces non-overlapping, gapless validity windows per entity; `snapshot_as_of` returns the correct row for dates on either side of a transition; `generate_child_reversal`'s `anomaly_subset` measurably elevates the rate only for the targeted subset; `generate_fanout_fact` produces the requested `multi_rate` proportion of multi-child parents within a reasonable tolerance
+- **VALIDATE**: `pytest tests/test_synthetic_traps.py -v`
 
 ### CREATE `scripts/generate_data.py`
 
-- **IMPLEMENT**: generate 8 tables into `data/retail.duckdb`, in dependency order:
+- **IMPLEMENT**: the retail-specific recipe — defines retail's 8 tables/columns and calls into `scripts/lib/synthetic_traps.py` for each of the 5 traps (see mapping in the library task above) rather than reimplementing SCD/reversal/FX/fan-out logic inline. Generate 8 tables into `data/retail.duckdb`, in dependency order:
   - `customers(customer_id INT PK, name, email, country, signup_date)` — ~300 rows across France/Germany/Belgium/Switzerland. No `segment` column here — segment is time-varying, see below (Trap 2).
   - `customer_segment_history(customer_id FK, segment ENUM['standard','VIP'], valid_from DATE, valid_to DATE NULL)` — every customer starts `standard`; ~15% are promoted to `VIP` at a random later date (new row with `valid_from` = promotion date, previous row's `valid_to` set to the same date). Current segment = row where `valid_to IS NULL`.
   - `products(product_id INT PK, name, category, subcategory)` — ~50 rows, 5-6 categories. No price/cost columns here — see below (Trap 1).
@@ -173,10 +193,11 @@ Execute in order, top to bottom.
   - `returns(return_id INT PK, order_item_id FK, return_date DATE, quantity_returned INT, reason)` — sparse table (~10% of order_items have a partial return in normal conditions). `orders.status` for these stays `completed` — returns are tracked at line grain only, never by flipping order status.
   - `shipments(shipment_id INT PK, order_id FK, ship_date DATE, carrier)` — ~85% of orders get exactly 1 shipment; ~15% get 2-3 shipments (split fulfillment) to make Trap 5 (fan-out) concretely reproducible via a naive join.
   - Embed the anomaly: in one specific quarter, France `order_items` have a materially higher `quantity_returned` rate than other quarter/country combinations (e.g. ~35% of quantity returned vs. baseline ~8%), simulating a fulfillment-delay-driven return spike — inserted via extra rows in `returns`, with `orders.status` unchanged (`completed`)
-- **PATTERN**: use `Faker.seed(42)` and Python's `random.seed(42)` at the top of the script for reproducibility; use sequential integer IDs, not random IDs, for primary keys
-- **IMPORTS**: `duckdb`, `faker.Faker`, `random`, `datetime`
+- **PATTERN**: `Faker.seed(42)` for name/email fields plus one explicit `random.Random(42)` instance passed into every `synthetic_traps` library call (not global `random.seed()`) for reproducibility; use sequential integer IDs, not random IDs, for primary keys
+- **IMPORTS**: `duckdb`, `faker.Faker`, `datetime`, and `from scripts.lib.synthetic_traps import generate_scd2_history, snapshot_as_of, generate_child_reversal, generate_fx_rates, generate_fanout_fact`
 - **GOTCHA 1**: generate rows in Python/pandas-like structures first, then bulk-insert into DuckDB (e.g. via `duckdb.sql` on a Python list-of-dicts or `duckdb.register` a DataFrame) rather than row-by-row `INSERT` for performance
 - **GOTCHA 2**: generation order matters — `product_price_history` and `customer_segment_history` must exist before `orders`/`order_items` are generated, since `order_items.unit_price`/`unit_cost` and any point-in-time segment lookups depend on them
+- **GOTCHA 3**: this file should read as a *thin recipe* — table/column names, row counts, and business parameters (transition rates, currencies) live here; the actual SCD/reversal/FX/fan-out mechanics must not be reimplemented here (they live in `scripts/lib/synthetic_traps.py`). If you find yourself writing validity-window logic or reversal-rate logic directly in this file, stop and move it to the library instead.
 - **VALIDATE**: `python scripts/generate_data.py && python -c "import duckdb; c=duckdb.connect('data/retail.duckdb'); print(c.sql('SELECT count(*) FROM orders').fetchone(), c.sql('SELECT count(*) FROM returns').fetchone(), c.sql('SELECT count(*) FROM shipments').fetchone())"`
 
 ### CREATE `tests/test_generated_data.py`
@@ -298,6 +319,7 @@ python -c "import yaml; yaml.safe_load(open('context/company.yaml')); yaml.safe_
 ### Level 2: Unit Tests
 
 ```bash
+pytest tests/test_synthetic_traps.py -v
 python scripts/generate_data.py
 pytest tests/test_generated_data.py -v
 ```
@@ -347,7 +369,8 @@ None required — no MCP servers or external services involved in Phase 1.
 
 ## ACCEPTANCE CRITERIA
 
-- [ ] `data/retail.duckdb` generates deterministically (same seed → same data) and passes all `tests/test_generated_data.py` checks, including the 5 trap-presence assertions
+- [ ] `scripts/lib/synthetic_traps.py` contains no retail-specific names and passes `tests/test_synthetic_traps.py` against the toy domain
+- [ ] `data/retail.duckdb` generates deterministically (same seed → same data) via `scripts/generate_data.py` calling into the library, and passes all `tests/test_generated_data.py` checks, including the 5 trap-presence assertions
 - [ ] `semantic/retail.ossie.yaml` parses as valid YAML and follows the Ossie `datasets`/`relationships`/`metrics` structure from the reference example, and resolves all 5 traps by name
 - [ ] `evals/questions.md` has exactly 20 questions, 5 per level (data/business/policy/action), covering all 5 traps
 - [ ] `evals/expected.md` answers are all derived from `scripts/verify_expected.py` output, not hand-typed
@@ -375,5 +398,18 @@ None required — no MCP servers or external services involved in Phase 1.
 - **Why Ossie's TPC-DS example is the syntax reference**: it's a real, retail-domain, fact/dimension-table example shipped by the Apache Ossie project itself — using it as the template minimizes the risk of inventing an incorrect YAML shape for a standard that's still at `0.2.0.dev0` and evolving.
 - **Why the glossary must be deliberately less precise than Ossie**: if `glossary.md` and `retail.ossie.yaml` encode the same precision, Condition B and Condition C become indistinguishable and the experiment can't isolate the semantic layer's specific contribution (PRD §14 risk: "conditions score equally, no signal").
 - **Why the schema was expanded from 4 flat tables to 8 with 5 deliberate traps**: the original design (customers/products/orders/order_items, single price, single currency, order-level status) is too simple to genuinely test semantic-layer value — a schema-only agent has a reasonable chance of guessing correctly by luck, which would produce a false negative ("semantic layers don't matter"). The 5 traps added — snapshot-vs-current pricing, a slowly-changing customer-segment dimension, line-grain partial returns decoupled from order status, multi-currency conversion, and a fan-out risk via split shipments — are standard, well-documented dimensional-modeling failure modes (the kind any real BI/semantic-layer tool exists to solve). Each has a concrete, checkable "wrong answer" a naive SQL query produces and a concrete "right answer" only available once the Ossie definitions supply the missing join/filter/conversion logic. This turns "does the semantic layer help?" from a vague impression into 5 falsifiable, individually attributable test cases.
-- **Deferred to Phase 2 (do not build now)**: `knowledge/` policy docs, Conditions D/E, the `/run-eval` automation skill. Deferred to Phase 3: the general business-model-first generator, process context layer.
+- **Domain-agnostic pattern catalog (for Phase 3, not built now)**: the 5 traps are retail-specific *instances* of generic dimensional-modeling patterns that recur in any business domain. Recording the mapping here so Phase 3's business-model-first generator has a concrete starting catalog to parameterize rather than re-deriving these from scratch:
+
+  | Trap (retail instance) | Domain-agnostic pattern | Other domains it shows up in |
+  |---|---|---|
+  | Product price history | Slowly-changing reference attribute (SCD Type 2) on a dimension | SaaS pricing tiers, insurance premium rates, employee salary bands |
+  | Customer segment history | Same SCD Type 2 pattern, different dimension | User plan tier, patient risk category, loan credit grade |
+  | Line-grain partial returns | Child-grain reversal/adjustment decoupled from parent-record status | Partial refunds, partial shipment cancellations, insurance claim adjustments |
+  | Multi-currency | Unit conversion applied at transaction time, not query time | Multi-region pricing, imperial/metric conversions, per-market tax rates |
+  | Shipment fan-out | Auxiliary 1:N fact at a different grain than the metric's base fact, wrongly placed on the join path | Login/event logs, support tickets, delivery attempts — any "tracking" table that shouldn't sit between a fact and its dimensions |
+
+  Phase 3 generalization should treat "pick N traps from this catalog and instantiate them for domain X's entities" as the reusable mechanism, rather than hand-designing new traps per domain from scratch. Do not build the generator itself in Phase 1 — this catalog is documentation only.
+- **Why business context isn't a 4th Phase 1 condition**: the PRD's context layer names business context (goals/KPIs/priorities) as a layer distinct from the semantic layer. Promoting `context/company.yaml` to an agent-visible condition now would turn the clean 3-way A/B/C comparison into a 4-way one before the core hypothesis (does *any* semantic layer help) is validated — PRD Phase 2 already scopes this properly as Conditions D/E once a `knowledge/` layer exists. `context/company.yaml` stays a human-only generation seed in Phase 1, but per the FORWARD-COMPATIBILITY note above, it's written with enough detail (objectives/KPIs/priorities, not just industry/markets) to be lifted into a real business-context artifact later with minimal rework.
+- **Why the generation code is a library, not a skill or subagent**: reusability here means "the same 5 trap mechanisms are callable for a different domain without rewriting them," which is a code-structure problem, not an agent-orchestration problem. A subagent is the wrong mechanism — subagents delegate reasoning/search within a session, they don't own persistent reusable code. A skill (e.g. a future `/generate-synthetic-enterprise`) is the *right eventual* mechanism for orchestrating "pick a domain → design a business model → pick traps from the catalog → generate data → write the semantic model," but that's the Phase 3 business-model-first generator, which needs LLM-driven business-model design and human validation gates (PRD §6/§12 Phase 3) — building that orchestration now, before Phase 1 has produced a result, is exactly the "over-engineered before proven necessary" risk PRD §14 already flags. The cheap, low-risk move available now is factoring the deterministic trap-generation logic into `scripts/lib/synthetic_traps.py` (domain-agnostic, unit-tested against a non-retail toy domain) so that whatever eventually orchestrates Phase 3 — a skill, a script, or a human — calls the same 5 functions instead of reimplementing SCD/reversal/FX/fan-out logic from scratch.
+- **Deferred to Phase 2 (do not build now)**: `knowledge/` policy docs, Conditions D/E, the `/run-eval` automation skill. Deferred to Phase 3: the general business-model-first generator (as a skill, using `scripts/lib/synthetic_traps.py` and the pattern catalog above), process context layer.
 - **Confidence score: 7/10** for one-pass success on the mechanical parts (schema, data generation, Ossie YAML, questions/expected answers) — these are fully specified but the added trap complexity (point-in-time joins for SCD tables, correct FX/return netting in generation code) has more moving parts than the original 4-table design, so budget extra time for `tests/test_generated_data.py` to fail and need iteration on the generator before all 5 trap assertions pass. The manual condition-run scoring (Phase 1f) still inherently depends on what Claude Code actually produces in each session, which cannot be predicted in advance.
