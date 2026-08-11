@@ -44,11 +44,15 @@ WHERE o.status='completed' GROUP BY 1 ORDER BY 1
 
 ## Q7 — Share of France Q3-2025 revenue from VIP-at-time-of-purchase customers
 
-**Answer:** VIP: €8,505.99 (9.46%) · standard: €81,416.76 (90.54%)
+**Answer:** VIP: €2,941.76 (9.81%) · standard: €27,056.06 (90.19%)
 
-## Q8 — Kitchenware avg unit price paid, by quarter
+*(Correction: the first version of this query joined order-item-grain rows to the segment-history table before aggregating, which fanned out — a segment row was matched once per order line instead of once per order, inflating both totals by ~3x while leaving the France Q3 net-revenue subtotal inconsistent with Q6. Fixed by aggregating to one row per order before joining segment history — see `scripts/verify_expected.py`. This is the same class of join-fan-out bug that Trap 5 (shipments) targets, just triggered by the segment-history join instead — a useful reminder that "aggregate before joining a 1:N table" is a general rule, not just a shipments-specific one.)*
 
-**Answer:** 2024-Q3: €120.78 (79 lines) · 2024-Q4: €118.07 (83) · 2025-Q1: €131.70 (56) · 2025-Q2: €131.01 (89) · 2025-Q3: €131.15 (83) · 2025-Q4: €117.07 (96). Price paid rose ~9% between 2024-Q4 and 2025-Q1 (consistent with a mid-period price increase for at least one Kitchenware product), then fell back in 2025-Q4.
+## Q8 — Kitchenware net revenue per unit sold, by quarter
+
+**Answer:** 2024-Q3: €115.08 · 2024-Q4: €112.33 · 2025-Q1: €126.03 · 2025-Q2: €121.66 · 2025-Q3: €123.89 · 2025-Q4: €113.06. Revenue-per-unit rose ~12% between 2024-Q4 and 2025-Q1 (consistent with a mid-period price increase for at least one Kitchenware product captured via `order_items.unit_price`), then fell back in 2025-Q4.
+
+*(Correction: the first version of this query computed a plain `AVG(unit_price)` with no discount or return netting — not actually "revenue per unit sold." Fixed to `SUM(net revenue) / SUM(net quantity)`, consistent with the governed `revenue` metric's netting logic.)*
 
 ## Q9 — Avg revenue per shipment: multi vs single shipment orders
 
@@ -64,7 +68,9 @@ WHERE o.status='completed' GROUP BY 1 ORDER BY 1
 
 ## Q12 — Is VIP segment more profitable (margin) than standard?
 
-**Answer:** VIP margin: 54.39% (revenue €171,497.57, cost €78,224.91). Standard margin: 54.88% (revenue €2,489,280.76, cost €1,123,194.15). Margins are nearly identical — VIP customers are **not** meaingfully more profitable on margin in this dataset, though they may still be more valuable on other dimensions (order frequency, retention).
+**Answer:** VIP margin: 54.54% (revenue €56,185.50, cost €25,544.70). Standard margin: 54.88% (revenue €817,589.09, cost €368,898.33). Margins are nearly identical — VIP customers are **not** meaningfully more profitable on margin in this dataset, though they may still be more valuable on other dimensions (order frequency, retention).
+
+*(Correction: revenue/cost totals were originally inflated ~3x by the same join-fan-out bug as Q7; the margin ratio itself was coincidentally unaffected since fan-out multiplies revenue and cost by the same factor. Fixed alongside Q7.)*
 
 ## Q13 — Multi-shipment vs single-shipment order profitability (margin)
 

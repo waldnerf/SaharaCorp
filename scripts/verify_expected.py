@@ -66,27 +66,29 @@ QUERIES: list[tuple[int, str]] = [
         GROUP BY 1 ORDER BY 1
     """),
     (7, f"""
-        WITH net AS (
-            SELECT o.order_id, o.customer_id, o.order_date, o.country, o.status, {NET_REVENUE} AS net_revenue_eur
+        WITH order_net AS (
+            SELECT o.order_id, o.customer_id, o.order_date, o.country, o.status, SUM({NET_REVENUE}) AS net_revenue_eur
             FROM order_items oi JOIN orders o ON o.order_id=oi.order_id
             LEFT JOIN returns r ON r.order_item_id=oi.order_item_id
+            GROUP BY 1,2,3,4,5
         ), seg AS (
             SELECT n.order_id, h.segment
-            FROM net n JOIN customer_segment_history h ON h.customer_id = n.customer_id
+            FROM order_net n JOIN customer_segment_history h ON h.customer_id = n.customer_id
               AND h.valid_from <= n.order_date AND (h.valid_to IS NULL OR n.order_date < h.valid_to)
         )
         SELECT s.segment, ROUND(SUM(n.net_revenue_eur),2) AS revenue_eur,
                ROUND(SUM(n.net_revenue_eur) * 1.0 / SUM(SUM(n.net_revenue_eur)) OVER (), 4) AS share
-        FROM net n JOIN seg s ON s.order_id = n.order_id
+        FROM order_net n JOIN seg s ON s.order_id = n.order_id
         WHERE n.country='France' AND n.status='completed' AND n.order_date BETWEEN '2025-07-01' AND '2025-09-30'
         GROUP BY 1 ORDER BY 1
     """),
-    (8, """
+    (8, f"""
         SELECT EXTRACT(year FROM o.order_date)::INT AS yr,
                CAST(FLOOR((EXTRACT(month FROM o.order_date)::INT -1)/3.0) AS INT)+1 AS q,
-               ROUND(AVG(oi.unit_price),2) AS avg_unit_price_paid, COUNT(*) AS n_lines
+               ROUND(SUM({NET_REVENUE}) / NULLIF(SUM(oi.quantity - COALESCE(r.quantity_returned,0)),0), 2) AS net_revenue_per_unit
         FROM order_items oi JOIN orders o ON o.order_id=oi.order_id JOIN products p ON p.product_id=oi.product_id
-        WHERE p.category='Kitchenware'
+        LEFT JOIN returns r ON r.order_item_id=oi.order_item_id
+        WHERE o.status='completed' AND p.category='Kitchenware'
         GROUP BY 1,2 ORDER BY 1,2
     """),
     (9, f"""
@@ -125,18 +127,19 @@ QUERIES: list[tuple[int, str]] = [
         FROM net WHERE country='France' AND status='completed'
     """),
     (12, f"""
-        WITH net AS (
-            SELECT o.order_id, o.customer_id, o.order_date, o.status, {NET_REVENUE} AS net_revenue_eur, {NET_COST} AS net_cost_eur
+        WITH order_net AS (
+            SELECT o.order_id, o.customer_id, o.order_date, o.status, SUM({NET_REVENUE}) AS net_revenue_eur, SUM({NET_COST}) AS net_cost_eur
             FROM order_items oi JOIN orders o ON o.order_id=oi.order_id
             LEFT JOIN returns r ON r.order_item_id=oi.order_item_id
             WHERE o.status='completed'
+            GROUP BY 1,2,3,4
         ), seg AS (
-            SELECT n.order_id, h.segment FROM net n JOIN customer_segment_history h ON h.customer_id=n.customer_id
+            SELECT n.order_id, h.segment FROM order_net n JOIN customer_segment_history h ON h.customer_id=n.customer_id
               AND h.valid_from <= n.order_date AND (h.valid_to IS NULL OR n.order_date < h.valid_to)
         )
         SELECT s.segment, ROUND(SUM(n.net_revenue_eur),2) AS revenue, ROUND(SUM(n.net_cost_eur),2) AS cost,
                ROUND((SUM(n.net_revenue_eur)-SUM(n.net_cost_eur))/SUM(n.net_revenue_eur),4) AS margin
-        FROM net n JOIN seg s ON s.order_id=n.order_id GROUP BY 1 ORDER BY 1
+        FROM order_net n JOIN seg s ON s.order_id=n.order_id GROUP BY 1 ORDER BY 1
     """),
     (13, f"""
         WITH order_agg AS (
