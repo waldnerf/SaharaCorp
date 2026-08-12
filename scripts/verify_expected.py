@@ -73,7 +73,7 @@ QUERIES: list[tuple[int, str]] = [
             GROUP BY 1,2,3,4,5
         ), seg AS (
             SELECT n.order_id, h.segment
-            FROM order_net n JOIN customer_segment_history h ON h.customer_id = n.customer_id
+            FROM order_net n JOIN customer_segments h ON h.customer_id = n.customer_id
               AND h.valid_from <= n.order_date AND (h.valid_to IS NULL OR n.order_date < h.valid_to)
         )
         SELECT s.segment, ROUND(SUM(n.net_revenue_eur),2) AS revenue_eur,
@@ -135,7 +135,7 @@ QUERIES: list[tuple[int, str]] = [
             WHERE o.status='completed'
             GROUP BY 1,2,3,4
         ), seg AS (
-            SELECT n.order_id, h.segment FROM order_net n JOIN customer_segment_history h ON h.customer_id=n.customer_id
+            SELECT n.order_id, h.segment FROM order_net n JOIN customer_segments h ON h.customer_id=n.customer_id
               AND h.valid_from <= n.order_date AND (h.valid_to IS NULL OR n.order_date < h.valid_to)
         )
         SELECT s.segment, ROUND(SUM(n.net_revenue_eur),2) AS revenue, ROUND(SUM(n.net_cost_eur),2) AS cost,
@@ -208,7 +208,7 @@ QUERIES: list[tuple[int, str]] = [
             LEFT JOIN returns r ON r.order_item_id=oi.order_item_id
             WHERE o.status='completed' GROUP BY 1
         ), current_seg AS (
-            SELECT customer_id, segment FROM customer_segment_history WHERE valid_to IS NULL
+            SELECT customer_id, segment FROM customer_segments WHERE valid_to IS NULL
         ), vip_avg AS (
             SELECT AVG(cs.n_orders) AS avg_n_orders, AVG(cs.aov) AS avg_aov
             FROM cust_stats cs JOIN current_seg s ON s.customer_id=cs.customer_id WHERE s.segment='VIP'

@@ -32,7 +32,7 @@ WHERE o.status='completed' GROUP BY 1 ORDER BY 1
 
 ## Q4 — Total shipments to Belgium
 
-**Answer:** 464
+**Answer:** 484
 
 ## Q5 — Total quantity ordered by category
 
@@ -56,7 +56,7 @@ WHERE o.status='completed' GROUP BY 1 ORDER BY 1
 
 ## Q9 — Is average revenue per shipment declining for split-fulfillment orders?
 
-**Answer:** Yes, with a partial reversal at the end. Net average revenue per shipment for orders with 2+ shipments: €219.46 (2024-Q3) → €199.74 → €192.96 → €183.00 → €150.48 (2025-Q3, the low point — coincides with the France return-rate anomaly quarter) → €210.01 (2025-Q4). A clear ~31% decline from mid-2024 through Q3 2025, partially reversing in the most recent quarter. A naive query joining `orders → shipments → order_items` would inflate revenue by double/triple-counting line items per shipment (Trap 5) — this query aggregates order-level net revenue first, then joins shipment counts back by `order_id`.
+**Answer:** Broadly yes, though noisier than a clean monotonic decline. Net average revenue per shipment for orders with 2+ shipments: €221.60 (2024-Q3) → €178.29 → €171.80 (2025-Q1, the low point) → €209.65 → €184.47 → €197.23 (2025-Q4). A clear drop from Q3 2024 to Q1 2025 (~22%), then a partial recovery and a second, milder dip through the rest of 2025 — not a single sustained trend, but revenue-per-shipment ends the period below where it started. A naive query joining `orders → shipments → order_items` would inflate revenue by double/triple-counting line items per shipment (Trap 5) — this query aggregates order-level net revenue first, then joins shipment counts back by `order_id`.
 
 *(Correction: the first version of this query computed a single aggregate split between multi- and single-shipment orders over the whole period — it didn't answer the question asked, which is about a **trend over time** for split-fulfillment orders specifically. Fixed to a per-quarter breakdown restricted to orders with 2+ shipments, matching the trend shape the question actually calls for.)*
 

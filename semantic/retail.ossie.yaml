@@ -40,8 +40,8 @@ semantic_model:
                 - dialect: ANSI_SQL
                   expression: signup_date
 
-      - name: customer_segment_history
-        source: main.customer_segment_history
+      - name: customer_segments
+        source: main.customer_segments
         primary_key: [customer_id, valid_from]
         description: Point-in-time history of each customer's segment (standard/VIP).
         ai_context: >
@@ -94,8 +94,8 @@ semantic_model:
                 - dialect: ANSI_SQL
                   expression: category
 
-      - name: product_price_history
-        source: main.product_price_history
+      - name: product_pricing
+        source: main.product_pricing
         primary_key: [product_id, valid_from]
         description: Point-in-time history of each product's price and cost.
         ai_context: >
@@ -194,9 +194,9 @@ semantic_model:
         primary_key: [order_item_id]
         description: >
           Order line fact. unit_price/unit_cost are the price actually paid
-          at sale time (already snapshotted from product_price_history as of
+          at sale time (already snapshotted from product_pricing as of
           order_date) — this is the correct source for revenue/margin, not
-          product_price_history.
+          product_pricing.
         fields:
           - name: order_item_id
             datatype: Integer
@@ -348,23 +348,23 @@ semantic_model:
           once per shipment. The revenue/margin/order_count/average_order_value
           metrics below never use this relationship.
 
-      - name: product_price_history_to_products
-        from: product_price_history
+      - name: product_pricing_to_products
+        from: product_pricing
         to: products
         from_columns: [product_id]
         to_columns: [product_id]
         ai_context: >
-          product_price_history is a point-in-time table, not a 1:1 dimension.
+          product_pricing is a point-in-time table, not a 1:1 dimension.
           Filter to the relevant date (valid_from <= date < COALESCE(valid_to,
           '9999-12-31')) rather than joining as if one row exists per product.
 
-      - name: customer_segment_history_to_customers
-        from: customer_segment_history
+      - name: customer_segments_to_customers
+        from: customer_segments
         to: customers
         from_columns: [customer_id]
         to_columns: [customer_id]
         ai_context: >
-          customer_segment_history is a point-in-time table, not a 1:1
+          customer_segments is a point-in-time table, not a 1:1
           dimension. Filter to the relevant date rather than joining as if
           one row exists per customer.
 
@@ -374,7 +374,7 @@ semantic_model:
           Net revenue in EUR: order-line value, netted for partial returns,
           net of line discount, converted to EUR at the order's FX rate.
           Only completed orders count. Resolves Traps 1 (uses order_items'
-          transaction-time price, never product_price_history), 3 (nets
+          transaction-time price, never product_pricing), 3 (nets
           returns.quantity_returned at line grain regardless of order
           status), and 4 (applies fx_rate_to_eur). Joins order_items ->
           orders and order_items -> returns only — never through shipments

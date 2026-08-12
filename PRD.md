@@ -275,6 +275,8 @@ Not applicable for MVP — there is no API surface. All interaction is via Claud
 - **Risk: Synthetic business model is too simple, so all conditions score equally well and the experiment produces no signal.**
   Mitigation: deliberately design Level 3–4 questions and at least one non-obvious data anomaly (e.g., a metric definition edge case like returns handling) that *only* correct semantic/knowledge context can resolve.
 
+  **Observed in Phase 1, amended:** the actual failure mode was narrower than expected — 3 of 5 deliberate dimensional-modeling traps (snapshot pricing, SCD customer segment, shipment fan-out) were avoided by the schema-only condition purely from table/column naming (`unit_price` vs. a table literally named `..._history`; a `shipments` table with an obvious 1:N shape), not from reasoning about the data. This means table/column naming itself can leak the "correct" join logic, undermining the trap's validity as a test. Added mitigation: avoid names that telegraph a trap's resolution — e.g. a temporal dimension table should be named after the attribute it holds (`product_pricing`, `customer_segments`), not flagged as historical in its own name; an auxiliary fan-out fact table should carry ordinary business columns (not just the FK that makes the fan-out risk obvious) so the risk must be discovered by checking cardinality, not by pattern-matching on table shape.
+
 - **Risk: Expected answers in `expected.md` are wrong, invalidating all scoring.**
   Mitigation: every expected answer must be produced by manually running verified SQL against `retail.duckdb` before any condition is evaluated — never hand-typed from intuition.
 

@@ -68,7 +68,7 @@ def generate_customers(rng: random.Random, fake: Faker) -> list[dict]:
     return rows
 
 
-def generate_customer_segment_history(rng: random.Random, customers: list[dict]) -> list[dict]:
+def generate_customer_segments(rng: random.Random, customers: list[dict]) -> list[dict]:
     def initial_value_fn(_rng):
         return {"segment": "standard"}
 
@@ -97,7 +97,7 @@ def generate_products(rng: random.Random, fake: Faker) -> list[dict]:
     return rows
 
 
-def generate_product_price_history(rng: random.Random, products: list[dict]) -> list[dict]:
+def generate_product_pricing(rng: random.Random, products: list[dict]) -> list[dict]:
     def initial_value_fn(_rng):
         unit_cost = round(_rng.uniform(5, 80), 2)
         unit_price = round(unit_cost * _rng.uniform(1.8, 2.6), 2)
@@ -197,13 +197,15 @@ def generate_returns(rng: random.Random, order_items: list[dict]) -> list[dict]:
 
 def generate_shipments(rng: random.Random, orders: list[dict]) -> list[dict]:
     order_ids = [o["order_id"] for o in orders]
-    rows = generate_fanout_fact(order_ids, min_children=1, max_children=3, multi_rate=0.15, rng=rng)
+    rows = generate_fanout_fact(order_ids, min_children=1, max_children=3, multi_rate=0.22, rng=rng)
     return [
         {
             "shipment_id": r["child_id"],
             "order_id": r["parent_id"],
             "ship_date": None,
             "carrier": rng.choice(["PostEU", "SwissPost", "ExpressLog"]),
+            "tracking_number": f"{rng.choice(['PE','SP','EL'])}{rng.randint(10**8, 10**9 - 1)}",
+            "weight_kg": round(rng.uniform(0.3, 12.0), 2),
         }
         for r in rows
     ]
@@ -217,7 +219,7 @@ def build_database(con: duckdb.DuckDBPyConnection, tables: dict[str, list[dict]]
         )
     """)
     con.execute("""
-        CREATE TABLE customer_segment_history (
+        CREATE TABLE customer_segments (
             customer_id INTEGER, segment VARCHAR, valid_from DATE, valid_to DATE
         )
     """)
@@ -227,7 +229,7 @@ def build_database(con: duckdb.DuckDBPyConnection, tables: dict[str, list[dict]]
         )
     """)
     con.execute("""
-        CREATE TABLE product_price_history (
+        CREATE TABLE product_pricing (
             product_id INTEGER, unit_price DECIMAL(10,2), unit_cost DECIMAL(10,2),
             valid_from DATE, valid_to DATE
         )
@@ -253,7 +255,8 @@ def build_database(con: duckdb.DuckDBPyConnection, tables: dict[str, list[dict]]
     """)
     con.execute("""
         CREATE TABLE shipments (
-            shipment_id INTEGER PRIMARY KEY, order_id INTEGER, ship_date DATE, carrier VARCHAR
+            shipment_id INTEGER PRIMARY KEY, order_id INTEGER, ship_date DATE, carrier VARCHAR,
+            tracking_number VARCHAR, weight_kg DECIMAL(6,2)
         )
     """)
 
@@ -262,16 +265,16 @@ def build_database(con: duckdb.DuckDBPyConnection, tables: dict[str, list[dict]]
         [(c["customer_id"], c["name"], c["email"], c["country"], c["signup_date"]) for c in tables["customers"]],
     )
     con.executemany(
-        "INSERT INTO customer_segment_history VALUES (?, ?, ?, ?)",
-        [(r["entity_id"], r["segment"], r["valid_from"], r["valid_to"]) for r in tables["customer_segment_history"]],
+        "INSERT INTO customer_segments VALUES (?, ?, ?, ?)",
+        [(r["entity_id"], r["segment"], r["valid_from"], r["valid_to"]) for r in tables["customer_segments"]],
     )
     con.executemany(
         "INSERT INTO products VALUES (?, ?, ?, ?)",
         [(p["product_id"], p["name"], p["category"], p["subcategory"]) for p in tables["products"]],
     )
     con.executemany(
-        "INSERT INTO product_price_history VALUES (?, ?, ?, ?, ?)",
-        [(r["entity_id"], r["unit_price"], r["unit_cost"], r["valid_from"], r["valid_to"]) for r in tables["product_price_history"]],
+        "INSERT INTO product_pricing VALUES (?, ?, ?, ?, ?)",
+        [(r["entity_id"], r["unit_price"], r["unit_cost"], r["valid_from"], r["valid_to"]) for r in tables["product_pricing"]],
     )
     con.executemany(
         "INSERT INTO orders VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -292,8 +295,11 @@ def build_database(con: duckdb.DuckDBPyConnection, tables: dict[str, list[dict]]
         [(r["return_id"], r["order_item_id"], r["return_date"], r["quantity_returned"], r["reason"]) for r in tables["returns"]],
     )
     con.executemany(
-        "INSERT INTO shipments VALUES (?, ?, ?, ?)",
-        [(s["shipment_id"], s["order_id"], s["ship_date"], s["carrier"]) for s in tables["shipments"]],
+        "INSERT INTO shipments VALUES (?, ?, ?, ?, ?, ?)",
+        [
+            (s["shipment_id"], s["order_id"], s["ship_date"], s["carrier"], s["tracking_number"], s["weight_kg"])
+            for s in tables["shipments"]
+        ],
     )
 
 
@@ -303,15 +309,15 @@ def main() -> None:
     rng = random.Random(SEED)
 
     customers = generate_customers(rng, fake)
-    customer_segment_history = generate_customer_segment_history(rng, customers)
+    customer_segments = generate_customer_segments(rng, customers)
     products = generate_products(rng, fake)
-    product_price_history = generate_product_price_history(rng, products)
+    product_pricing = generate_product_pricing(rng, products)
 
     order_dates = _days_between(DATA_START, DATA_END)
     fx_rates = generate_fx_rates({"CHF": 0.96}, base_currency="EUR", dates=order_dates, rng=rng)
 
     orders = generate_orders(rng, customers, fx_rates)
-    order_items = generate_order_items(rng, orders, products, product_price_history)
+    order_items = generate_order_items(rng, orders, products, product_pricing)
     returns = generate_returns(rng, order_items)
     shipments = generate_shipments(rng, orders)
 
@@ -324,9 +330,9 @@ def main() -> None:
             con,
             {
                 "customers": customers,
-                "customer_segment_history": customer_segment_history,
+                "customer_segments": customer_segments,
                 "products": products,
-                "product_price_history": product_price_history,
+                "product_pricing": product_pricing,
                 "orders": orders,
                 "order_items": order_items,
                 "returns": returns,

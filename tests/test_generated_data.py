@@ -38,8 +38,8 @@ def test_row_counts_within_expected_ranges(con):
 @pytest.mark.parametrize(
     "sql",
     [
-        "SELECT COUNT(*) FROM customer_segment_history h LEFT JOIN customers c USING (customer_id) WHERE c.customer_id IS NULL",
-        "SELECT COUNT(*) FROM product_price_history h LEFT JOIN products p USING (product_id) WHERE p.product_id IS NULL",
+        "SELECT COUNT(*) FROM customer_segments h LEFT JOIN customers c USING (customer_id) WHERE c.customer_id IS NULL",
+        "SELECT COUNT(*) FROM product_pricing h LEFT JOIN products p USING (product_id) WHERE p.product_id IS NULL",
         "SELECT COUNT(*) FROM orders o LEFT JOIN customers c USING (customer_id) WHERE c.customer_id IS NULL",
         "SELECT COUNT(*) FROM order_items oi LEFT JOIN orders o USING (order_id) WHERE o.order_id IS NULL",
         "SELECT COUNT(*) FROM order_items oi LEFT JOIN products p USING (product_id) WHERE p.product_id IS NULL",
@@ -62,7 +62,7 @@ def test_no_orders_with_zero_order_items(con):
 # --- Trap 1: snapshot vs. current pricing -----------------------------------
 
 def test_trap1_at_least_one_product_has_a_price_change(con):
-    sql = "SELECT COUNT(*) FROM (SELECT product_id FROM product_price_history GROUP BY product_id HAVING COUNT(*) > 1)"
+    sql = "SELECT COUNT(*) FROM (SELECT product_id FROM product_pricing GROUP BY product_id HAVING COUNT(*) > 1)"
     assert _count(con, sql) >= 1
 
 
@@ -70,7 +70,7 @@ def test_trap1_a_price_changed_product_has_orders_before_and_after(con):
     sql = """
         WITH changed AS (
             SELECT product_id, MIN(valid_to) AS chg_date
-            FROM product_price_history WHERE valid_to IS NOT NULL GROUP BY product_id
+            FROM product_pricing WHERE valid_to IS NOT NULL GROUP BY product_id
         )
         SELECT COUNT(*) FROM changed ch
         WHERE EXISTS (
@@ -87,7 +87,7 @@ def test_trap1_a_price_changed_product_has_orders_before_and_after(con):
 # --- Trap 2: slowly-changing customer segment -------------------------------
 
 def test_trap2_at_least_one_customer_has_a_segment_promotion(con):
-    sql = "SELECT COUNT(*) FROM (SELECT customer_id FROM customer_segment_history GROUP BY customer_id HAVING COUNT(*) > 1)"
+    sql = "SELECT COUNT(*) FROM (SELECT customer_id FROM customer_segments GROUP BY customer_id HAVING COUNT(*) > 1)"
     assert _count(con, sql) >= 1
 
 
@@ -95,7 +95,7 @@ def test_trap2_a_promoted_customer_has_orders_before_and_after(con):
     sql = """
         WITH promo AS (
             SELECT customer_id, MIN(valid_to) AS promo_date
-            FROM customer_segment_history WHERE valid_to IS NOT NULL GROUP BY customer_id
+            FROM customer_segments WHERE valid_to IS NOT NULL GROUP BY customer_id
         )
         SELECT COUNT(*) FROM promo p
         WHERE EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = p.customer_id AND o.order_date < p.promo_date)
