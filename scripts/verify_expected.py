@@ -93,14 +93,15 @@ QUERIES: list[tuple[int, str]] = [
     """),
     (9, f"""
         WITH order_rev AS (
-            SELECT o.order_id, SUM({NET_REVENUE}) AS net_revenue_eur
+            SELECT o.order_id, o.order_date, SUM({NET_REVENUE}) AS net_revenue_eur
             FROM order_items oi JOIN orders o ON o.order_id=oi.order_id
             LEFT JOIN returns r ON r.order_item_id=oi.order_item_id
-            WHERE o.status='completed' GROUP BY 1
+            WHERE o.status='completed' GROUP BY 1,2
         ), ship_counts AS (SELECT order_id, COUNT(*) AS n_shipments FROM shipments GROUP BY 1)
-        SELECT CASE WHEN sc.n_shipments >= 2 THEN 'multi' ELSE 'single' END AS fulfillment_type,
+        SELECT date_trunc('quarter', orv.order_date) AS quarter, COUNT(*) AS n_split_orders,
                ROUND(SUM(orv.net_revenue_eur) / SUM(sc.n_shipments), 2) AS avg_revenue_per_shipment
         FROM order_rev orv JOIN ship_counts sc ON sc.order_id = orv.order_id
+        WHERE sc.n_shipments > 1
         GROUP BY 1 ORDER BY 1
     """),
     (10, """

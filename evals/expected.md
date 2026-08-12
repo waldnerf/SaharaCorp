@@ -54,9 +54,11 @@ WHERE o.status='completed' GROUP BY 1 ORDER BY 1
 
 *(Correction: the first version of this query computed a plain `AVG(unit_price)` with no discount or return netting — not actually "revenue per unit sold." Fixed to `SUM(net revenue) / SUM(net quantity)`, consistent with the governed `revenue` metric's netting logic.)*
 
-## Q9 — Avg revenue per shipment: multi vs single shipment orders
+## Q9 — Is average revenue per shipment declining for split-fulfillment orders?
 
-**Answer:** multi-shipment: €193.06/shipment · single-shipment: €447.29/shipment. Multi-shipment orders show materially lower revenue per shipment — a naive query joining `orders → shipments → order_items` would inflate the "multi" figure by double/triple-counting line items per shipment (Trap 5).
+**Answer:** Yes, with a partial reversal at the end. Net average revenue per shipment for orders with 2+ shipments: €219.46 (2024-Q3) → €199.74 → €192.96 → €183.00 → €150.48 (2025-Q3, the low point — coincides with the France return-rate anomaly quarter) → €210.01 (2025-Q4). A clear ~31% decline from mid-2024 through Q3 2025, partially reversing in the most recent quarter. A naive query joining `orders → shipments → order_items` would inflate revenue by double/triple-counting line items per shipment (Trap 5) — this query aggregates order-level net revenue first, then joins shipment counts back by `order_id`.
+
+*(Correction: the first version of this query computed a single aggregate split between multi- and single-shipment orders over the whole period — it didn't answer the question asked, which is about a **trend over time** for split-fulfillment orders specifically. Fixed to a per-quarter breakdown restricted to orders with 2+ shipments, matching the trend shape the question actually calls for.)*
 
 ## Q10 — Highest return rate, market/quarter
 

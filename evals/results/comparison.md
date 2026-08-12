@@ -76,7 +76,7 @@ design flaw (see Eval Design Corrections below); not attributable to any conditi
 | 6 | 3 | PASS | PASS | PASS | question said "net revenue" explicitly — no ambiguity |
 | 7 | 2,3,4 | FAIL | FAIL | PASS | A/B split the *gross* Q3 total by segment (7.3%/92.7%); C split the *net* total correctly (9.8%/90.2%) |
 | 8 | 1 | N/A* | N/A* | PASS | ground truth was flawed pre-correction; C's approach was correct all along |
-| 9 | 5 | PARTIAL | PARTIAL | PASS | ground truth aggregation was flawed for a trend question; A/B's gross-based quarterly series masks the Q3-2025 dip that C's net-based series correctly shows |
+| 9 | 3,5 | FAIL | PARTIAL | PASS | ground truth was fixed to a per-quarter trend (see corrections below); A's gross-revenue series shows an *increase* through 2025-Q3 — the opposite direction of the real dip — while B's gross-based series at least locates the low point in the right quarter, just understates its depth; only C (net revenue) reproduces the corrected ground truth exactly |
 | 10 | 3 | PASS | PASS | PASS | quantity-based ratio, no revenue definition involved |
 | 11 | 1,3 | PASS | PASS | PASS | same qualitative conclusion (ample headroom); magnitude differs but doesn't change the answer |
 | 12 | 2 | PARTIAL | PARTIAL | PASS | correct qualitative conclusion (VIP not more profitable); margin magnitude off by ~2.3pp from the cost/discount treatment |
@@ -89,15 +89,18 @@ design flaw (see Eval Design Corrections below); not attributable to any conditi
 | 19 | 2 | PASS | PASS | PASS | open-ended question; all three reach the same core finding (VIP not more profitable), differ only in which specific customers they surface |
 | 20 | 1,2,3,4,5 | PARTIAL | PARTIAL | PASS | same recommendation (prioritize France); margin ranking (Germany vs. France) flips at the margin, same systematic ~2.3pp gap |
 
-**Tally:** C matches expected ground truth on 20/20 (excluding the 2
-questions where the ground truth itself needed a scope call, both of which
-C also handled sensibly). A and B each: 3 clean FAILs (Q1, Q2, Q7), 6
-PARTIALs (Q9, Q12, Q13,18, 20, plus Q9's masking issue), 11 PASSes.
+**Tally (of 18 scoreable questions, excluding the 2 N/A* rows):** C
+matches corrected ground truth on 18/18. A: 4 clean FAILs (Q1, Q2, Q7,
+Q9), 4 PARTIALs (Q12, Q13, Q18, Q20), 10 PASSes. B: 3 clean FAILs (Q1,
+Q2, Q7), 5 PARTIALs (Q9, Q12, Q13, Q18, Q20), 10 PASSes. Q9 moved from
+PARTIAL to a clean FAIL for A specifically after the ground-truth
+correction below — A's gross-revenue series shows an *increase* through
+2025-Q3, the opposite direction of the real, return-driven dip.
 
 ## Eval design corrections found during this run
 
 Running the experiment for real surfaced three flaws in `evals/expected.md`
-and `scripts/verify_expected.py` itself, all now fixed (see git history for
+and `scripts/verify_expected.py` itself — all now fixed (see git history for
 `scripts/verify_expected.py`):
 
 1. **Q7 and Q12's original ground-truth SQL had a join-fan-out bug** —
@@ -113,12 +116,19 @@ and `scripts/verify_expected.py` itself, all now fixed (see git history for
    discount or return netting — not actually "revenue per unit sold."
    Fixed to `SUM(net revenue) / SUM(net quantity)`, which is what all
    three conditions had already (independently) converged on.
-3. **Q9's ground truth computed a single aggregate split** (multi vs.
-   single shipment) when the question asks about a **trend over time** —
-   a scope mismatch between the question and the verification query. Not
-   fixed (left as a known limitation); all three conditions' quarterly
-   breakdowns are more responsive to the actual question than the
-   ground truth is.
+3. **Q9's original ground truth computed a single aggregate split** (multi
+   vs. single shipment) when the question asks about a **trend over
+   time** for split-fulfillment orders specifically — a scope mismatch
+   between the question and the verification query. Fixed to a
+   per-quarter net-revenue-per-shipment series restricted to orders with
+   2+ shipments, matching Condition C's own query shape exactly (C's
+   answer was already correct against this corrected ground truth,
+   confirmed by re-running `scripts/verify_expected.py`). This changes
+   Q9's score for Condition A from PARTIAL to a clean FAIL: A's
+   gross-revenue series shows an *increase* through 2025-Q3, the
+   opposite direction of the real dip, which is driven by the same
+   return-netting logic (Trap 3) as several other questions — so Q9
+   should be read as evidence for Trap 3, not primarily Trap 5.
 
 ## Implication for the PRD's Phase 1 hypothesis
 
