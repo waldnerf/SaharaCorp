@@ -56,9 +56,11 @@ WHERE o.status='completed' GROUP BY 1 ORDER BY 1
 
 ## Q9 — Is average revenue per shipment declining for split-fulfillment orders?
 
-**Answer:** Broadly yes, though noisier than a clean monotonic decline. Net average revenue per shipment for orders with 2+ shipments: €221.60 (2024-Q3) → €178.29 → €171.80 (2025-Q1, the low point) → €209.65 → €184.47 → €197.23 (2025-Q4). A clear drop from Q3 2024 to Q1 2025 (~22%), then a partial recovery and a second, milder dip through the rest of 2025 — not a single sustained trend, but revenue-per-shipment ends the period below where it started. A naive query joining `orders → shipments → order_items` would inflate revenue by double/triple-counting line items per shipment (Trap 5) — this query aggregates order-level net revenue first, then joins shipment counts back by `order_id`.
+**Answer:** No consistent decline — the series is noisy rather than trending. Net average revenue per shipment for orders with 2+ shipments (total net revenue in the quarter ÷ total shipment-count in the quarter): €221.60 (2024-Q3) → €178.29 → €171.80 (2025-Q1, the low point) → €209.65 → €184.47 → €197.23 (2025-Q4). It drops sharply in the first two quarters, rebounds by 2025-Q2, dips again, then partially recovers — ending modestly below (~11%) where it started but with no single sustained trajectory. A naive query joining `orders → shipments → order_items` would inflate revenue by double/triple-counting line items per shipment (Trap 5) — this query aggregates order-level net revenue first, then joins shipment counts back by `order_id`.
 
-*(Correction: the first version of this query computed a single aggregate split between multi- and single-shipment orders over the whole period — it didn't answer the question asked, which is about a **trend over time** for split-fulfillment orders specifically. Fixed to a per-quarter breakdown restricted to orders with 2+ shipments, matching the trend shape the question actually calls for.)*
+*(Correction 1: the first version of this query computed a single aggregate split between multi- and single-shipment orders over the whole period — it didn't answer the question asked, which is about a **trend over time** for split-fulfillment orders specifically. Fixed to a per-quarter breakdown restricted to orders with 2+ shipments, matching the trend shape the question actually calls for.)*
+
+*(Correction 2, discovered after the schema-naming tightening rerun: this query computes the ratio of quarterly **totals** (SUM revenue ÷ SUM shipments), which weights larger orders more heavily. All three fresh condition runs independently computed the **unweighted mean of each order's own** revenue/shipment-count ratio instead — a different, equally defensible statistic — and all three converged on the same qualitative reading ("no consistent decline, just fluctuation") regardless of which revenue-netting convention they used. That three-way agreement is stronger evidence than this one hand-written query, so the qualitative verdict above was revised from an earlier, more assertive "yes, declining" framing to match what the data actually supports.)*
 
 ## Q10 — Highest return rate, market/quarter
 
@@ -76,7 +78,7 @@ WHERE o.status='completed' GROUP BY 1 ORDER BY 1
 
 ## Q13 — Multi-shipment vs single-shipment order profitability (margin)
 
-**Answer:** multi-shipment: 55.02% margin (287 orders) · single-shipment: 54.83% margin (1,644 orders). Margins are essentially the same — split fulfillment does not materially affect margin, even though it materially affects revenue-per-shipment (Q9).
+**Answer:** multi-shipment: 55.08% margin (404 orders) · single-shipment: 54.79% margin (1,527 orders). Margins are essentially the same — split fulfillment does not materially affect margin, even though it materially affects revenue-per-shipment (Q9).
 
 ## Q14 — Swiss vs Eurozone revenue/margin trend
 
