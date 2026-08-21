@@ -1,0 +1,129 @@
+{
+  "run_id": "b-variants-run1",
+  "condition": "B",
+  "started_at": "2026-08-21T19:43:05.692606+00:00",
+  "queries": [
+    {
+      "question_id": 101,
+      "sql": "SELECT DISTINCT status FROM orders",
+      "row_count": 2,
+      "at": "2026-08-21T19:43:05.692672+00:00"
+    },
+    {
+      "question_id": 101,
+      "sql": "SELECT MIN(order_date), MAX(order_date) FROM orders",
+      "row_count": 1,
+      "at": "2026-08-21T19:43:17.539796+00:00"
+    },
+    {
+      "question_id": 101,
+      "sql": "SELECT DISTINCT segment FROM customer_segments",
+      "row_count": 2,
+      "at": "2026-08-21T19:43:17.919782+00:00"
+    },
+    {
+      "question_id": 101,
+      "sql": "SELECT DISTINCT country FROM orders",
+      "row_count": 4,
+      "at": "2026-08-21T19:43:18.368564+00:00"
+    },
+    {
+      "question_id": 101,
+      "sql": "SELECT o.country, ROUND(SUM((oi.quantity - COALESCE(r.qty_returned,0)) * oi.unit_price * (1 - oi.line_discount_pct/100.0) * o.fx_rate_to_eur), 2) AS net_revenue_eur FROM orders o JOIN order_items oi ON oi.order_id = o.order_id LEFT JOIN (SELECT order_item_id, SUM(quantity_returned) AS qty_returned FROM returns GROUP BY order_item_id) r ON r.order_item_id = oi.order_item_id WHERE o.status = 'completed' GROUP BY o.country ORDER BY o.country",
+      "row_count": 4,
+      "at": "2026-08-21T19:43:30.057063+00:00"
+    },
+    {
+      "question_id": 102,
+      "sql": "SELECT o.country, ROUND(SUM(oi.quantity * oi.unit_price * (1 - oi.line_discount_pct/100.0) * o.fx_rate_to_eur), 2) AS revenue_eur FROM orders o JOIN order_items oi ON oi.order_id = o.order_id WHERE o.status = 'completed' GROUP BY o.country ORDER BY o.country",
+      "row_count": 4,
+      "at": "2026-08-21T19:43:41.599830+00:00"
+    },
+    {
+      "question_id": 103,
+      "sql": "WITH order_net AS (SELECT o.order_id, CASE WHEN o.order_date BETWEEN '2025-01-01' AND '2025-03-31' THEN 'Q1_2025' WHEN o.order_date BETWEEN '2024-10-01' AND '2024-12-31' THEN 'Q4_2024' END AS qtr, SUM((oi.quantity - COALESCE(r.qty_returned,0)) * oi.unit_price * (1 - oi.line_discount_pct/100.0) * o.fx_rate_to_eur) AS net_order_value FROM orders o JOIN order_items oi ON oi.order_id = o.order_id LEFT JOIN (SELECT order_item_id, SUM(quantity_returned) AS qty_returned FROM returns GROUP BY order_item_id) r ON r.order_item_id = oi.order_item_id WHERE o.status = 'completed' GROUP BY o.order_id, o.order_date) SELECT qtr, COUNT(*) AS n_orders, ROUND(AVG(net_order_value),2) AS avg_order_value_net FROM order_net WHERE qtr IS NOT NULL GROUP BY qtr ORDER BY qtr",
+      "row_count": 2,
+      "at": "2026-08-21T19:43:56.182904+00:00"
+    },
+    {
+      "question_id": 104,
+      "sql": "WITH order_gross AS (SELECT o.order_id, CASE WHEN o.order_date BETWEEN '2025-01-01' AND '2025-03-31' THEN 'Q1_2025' WHEN o.order_date BETWEEN '2024-10-01' AND '2024-12-31' THEN 'Q4_2024' END AS qtr, SUM(oi.quantity * oi.unit_price * (1 - oi.line_discount_pct/100.0) * o.fx_rate_to_eur) AS order_value FROM orders o JOIN order_items oi ON oi.order_id = o.order_id WHERE o.status = 'completed' GROUP BY o.order_id, o.order_date) SELECT qtr, COUNT(*) AS n_orders, ROUND(AVG(order_value),2) AS avg_order_value FROM order_gross WHERE qtr IS NOT NULL GROUP BY qtr ORDER BY qtr",
+      "row_count": 2,
+      "at": "2026-08-21T19:44:08.694164+00:00"
+    },
+    {
+      "question_id": 105,
+      "sql": "SELECT * FROM customer_segments ORDER BY customer_id LIMIT 10",
+      "row_count": 10,
+      "at": "2026-08-21T19:44:22.333938+00:00"
+    },
+    {
+      "question_id": 105,
+      "sql": "WITH line_net AS (SELECT o.order_id, o.customer_id, (oi.quantity - COALESCE(r.qty_returned,0)) * oi.unit_price * (1 - oi.line_discount_pct/100.0) * o.fx_rate_to_eur AS net_val, o.order_date FROM orders o JOIN order_items oi ON oi.order_id = o.order_id LEFT JOIN (SELECT order_item_id, SUM(quantity_returned) AS qty_returned FROM returns GROUP BY order_item_id) r ON r.order_item_id = oi.order_item_id WHERE o.status = 'completed' AND o.country = 'France' AND o.order_date BETWEEN '2025-07-01' AND '2025-09-30'), seg AS (SELECT ln.*, cs.segment FROM line_net ln LEFT JOIN customer_segments cs ON cs.customer_id = ln.customer_id AND ln.order_date >= cs.valid_from AND (cs.valid_to IS NULL OR ln.order_date < cs.valid_to)) SELECT ROUND(SUM(CASE WHEN segment='VIP' THEN net_val ELSE 0 END),2) AS vip_net_revenue, ROUND(SUM(net_val),2) AS total_net_revenue, ROUND(100.0*SUM(CASE WHEN segment='VIP' THEN net_val ELSE 0 END)/SUM(net_val),2) AS vip_share_pct FROM seg",
+      "row_count": 1,
+      "at": "2026-08-21T19:44:33.967651+00:00"
+    },
+    {
+      "question_id": 106,
+      "sql": "WITH line_gross AS (SELECT o.order_id, o.customer_id, oi.quantity * oi.unit_price * (1 - oi.line_discount_pct/100.0) * o.fx_rate_to_eur AS gross_val, o.order_date FROM orders o JOIN order_items oi ON oi.order_id = o.order_id WHERE o.status = 'completed' AND o.country = 'France' AND o.order_date BETWEEN '2025-07-01' AND '2025-09-30'), seg AS (SELECT lg.*, cs.segment FROM line_gross lg LEFT JOIN customer_segments cs ON cs.customer_id = lg.customer_id AND lg.order_date >= cs.valid_from AND (cs.valid_to IS NULL OR lg.order_date < cs.valid_to)) SELECT ROUND(SUM(CASE WHEN segment='VIP' THEN gross_val ELSE 0 END),2) AS vip_gross_revenue, ROUND(SUM(gross_val),2) AS total_gross_revenue, ROUND(100.0*SUM(CASE WHEN segment='VIP' THEN gross_val ELSE 0 END)/SUM(gross_val),2) AS vip_share_pct FROM seg",
+      "row_count": 1,
+      "at": "2026-08-21T19:44:48.918403+00:00"
+    },
+    {
+      "question_id": 106,
+      "sql": "SELECT COUNT(*) AS n_items, COUNT(DISTINCT oi.order_item_id) AS distinct_items FROM orders o JOIN order_items oi ON oi.order_id=o.order_id WHERE o.status='completed' AND o.country='France' AND o.order_date BETWEEN '2025-07-01' AND '2025-09-30'",
+      "row_count": 1,
+      "at": "2026-08-21T19:45:04.947059+00:00"
+    },
+    {
+      "question_id": 106,
+      "sql": "SELECT COUNT(*) AS n_items_seg FROM orders o JOIN order_items oi ON oi.order_id=o.order_id LEFT JOIN customer_segments cs ON cs.customer_id=o.customer_id AND o.order_date>=cs.valid_from AND (cs.valid_to IS NULL OR o.order_date<cs.valid_to) WHERE o.status='completed' AND o.country='France' AND o.order_date BETWEEN '2025-07-01' AND '2025-09-30'",
+      "row_count": 1,
+      "at": "2026-08-21T19:45:05.339274+00:00"
+    },
+    {
+      "question_id": 106,
+      "sql": "SELECT SUM(oi.quantity) AS total_qty, SUM(COALESCE(r.qty_returned,0)) AS total_returned FROM orders o JOIN order_items oi ON oi.order_id=o.order_id LEFT JOIN (SELECT order_item_id, SUM(quantity_returned) AS qty_returned FROM returns GROUP BY order_item_id) r ON r.order_item_id=oi.order_item_id WHERE o.status='completed' AND o.country='France' AND o.order_date BETWEEN '2025-07-01' AND '2025-09-30'",
+      "row_count": 1,
+      "at": "2026-08-21T19:45:19.385879+00:00"
+    }
+  ],
+  "answers": [
+    {
+      "question_id": 101,
+      "sql": "SELECT o.country, ROUND(SUM((oi.quantity - COALESCE(r.qty_returned,0)) * oi.unit_price * (1 - oi.line_discount_pct/100.0) * o.fx_rate_to_eur), 2) AS net_revenue_eur FROM orders o JOIN order_items oi ON oi.order_id = o.order_id LEFT JOIN (SELECT order_item_id, SUM(quantity_returned) AS qty_returned FROM returns GROUP BY order_item_id) r ON r.order_item_id = oi.order_item_id WHERE o.status = 'completed' GROUP BY o.country ORDER BY o.country",
+      "answer": "Over the full data period (2024-07-01 to 2025-12-31), net-of-returns revenue for completed orders was: France EUR 304,427.46; Germany EUR 272,499.02; Belgium EUR 174,425.53; Switzerland EUR 167,643.12.",
+      "at": "2026-08-21T19:45:34.342860+00:00"
+    },
+    {
+      "question_id": 102,
+      "sql": "SELECT o.country, ROUND(SUM(oi.quantity * oi.unit_price * (1 - oi.line_discount_pct/100.0) * o.fx_rate_to_eur), 2) AS revenue_eur FROM orders o JOIN order_items oi ON oi.order_id = o.order_id WHERE o.status = 'completed' GROUP BY o.country ORDER BY o.country",
+      "answer": "Over the full data period (2024-07-01 to 2025-12-31), gross revenue (not netted for returns) for completed orders was: France EUR 341,758.01; Germany EUR 281,931.10; Belgium EUR 179,669.98; Switzerland EUR 174,560.54.",
+      "at": "2026-08-21T19:45:47.055823+00:00"
+    },
+    {
+      "question_id": 103,
+      "sql": "WITH order_net AS (SELECT o.order_id, CASE WHEN o.order_date BETWEEN '2025-01-01' AND '2025-03-31' THEN 'Q1_2025' WHEN o.order_date BETWEEN '2024-10-01' AND '2024-12-31' THEN 'Q4_2024' END AS qtr, SUM((oi.quantity - COALESCE(r.qty_returned,0)) * oi.unit_price * (1 - oi.line_discount_pct/100.0) * o.fx_rate_to_eur) AS net_order_value FROM orders o JOIN order_items oi ON oi.order_id = o.order_id LEFT JOIN (SELECT order_item_id, SUM(quantity_returned) AS qty_returned FROM returns GROUP BY order_item_id) r ON r.order_item_id = oi.order_item_id WHERE o.status = 'completed' GROUP BY o.order_id, o.order_date) SELECT qtr, COUNT(*) AS n_orders, ROUND(AVG(net_order_value),2) AS avg_order_value_net FROM order_net WHERE qtr IS NOT NULL GROUP BY qtr ORDER BY qtr",
+      "answer": "Net-of-returns average order value (completed orders) was EUR 496.79 in Q1 2025 (290 orders) versus EUR 478.44 in Q4 2024 (340 orders) -- an increase of about EUR 18.35, or roughly 3.8%.",
+      "at": "2026-08-21T19:45:58.357442+00:00"
+    },
+    {
+      "question_id": 104,
+      "sql": "WITH order_gross AS (SELECT o.order_id, CASE WHEN o.order_date BETWEEN '2025-01-01' AND '2025-03-31' THEN 'Q1_2025' WHEN o.order_date BETWEEN '2024-10-01' AND '2024-12-31' THEN 'Q4_2024' END AS qtr, SUM(oi.quantity * oi.unit_price * (1 - oi.line_discount_pct/100.0) * o.fx_rate_to_eur) AS order_value FROM orders o JOIN order_items oi ON oi.order_id = o.order_id WHERE o.status = 'completed' GROUP BY o.order_id, o.order_date) SELECT qtr, COUNT(*) AS n_orders, ROUND(AVG(order_value),2) AS avg_order_value FROM order_gross WHERE qtr IS NOT NULL GROUP BY qtr ORDER BY qtr",
+      "answer": "Gross average order value (not netted for returns, completed orders) was EUR 516.13 in Q1 2025 (290 orders) versus EUR 501.17 in Q4 2024 (340 orders) -- an increase of about EUR 14.96, or roughly 3.0%.",
+      "at": "2026-08-21T19:46:11.072784+00:00"
+    },
+    {
+      "question_id": 105,
+      "sql": "WITH line_net AS (SELECT o.order_id, o.customer_id, (oi.quantity - COALESCE(r.qty_returned,0)) * oi.unit_price * (1 - oi.line_discount_pct/100.0) * o.fx_rate_to_eur AS net_val, o.order_date FROM orders o JOIN order_items oi ON oi.order_id = o.order_id LEFT JOIN (SELECT order_item_id, SUM(quantity_returned) AS qty_returned FROM returns GROUP BY order_item_id) r ON r.order_item_id = oi.order_item_id WHERE o.status = 'completed' AND o.country = 'France' AND o.order_date BETWEEN '2025-07-01' AND '2025-09-30'), seg AS (SELECT ln.*, cs.segment FROM line_net ln LEFT JOIN customer_segments cs ON cs.customer_id = ln.customer_id AND ln.order_date >= cs.valid_from AND (cs.valid_to IS NULL OR ln.order_date < cs.valid_to)) SELECT ROUND(SUM(CASE WHEN segment='VIP' THEN net_val ELSE 0 END),2) AS vip_net_revenue, ROUND(SUM(net_val),2) AS total_net_revenue, ROUND(100.0*SUM(CASE WHEN segment='VIP' THEN net_val ELSE 0 END)/SUM(net_val),2) AS vip_share_pct FROM seg",
+      "answer": "In Q3 2025, France's net-of-returns revenue (completed orders) was EUR 31,624.82, of which EUR 3,133.27 came from customers who were VIP segment at time of purchase -- a VIP share of about 9.91%.",
+      "at": "2026-08-21T19:46:22.889583+00:00"
+    },
+    {
+      "question_id": 106,
+      "sql": "WITH line_gross AS (SELECT o.order_id, o.customer_id, oi.quantity * oi.unit_price * (1 - oi.line_discount_pct/100.0) * o.fx_rate_to_eur AS gross_val, o.order_date FROM orders o JOIN order_items oi ON oi.order_id = o.order_id WHERE o.status = 'completed' AND o.country = 'France' AND o.order_date BETWEEN '2025-07-01' AND '2025-09-30'), seg AS (SELECT lg.*, cs.segment FROM line_gross lg LEFT JOIN customer_segments cs ON cs.customer_id = lg.customer_id AND lg.order_date >= cs.valid_from AND (cs.valid_to IS NULL OR lg.order_date < cs.valid_to)) SELECT ROUND(SUM(CASE WHEN segment='VIP' THEN gross_val ELSE 0 END),2) AS vip_gross_revenue, ROUND(SUM(gross_val),2) AS total_gross_revenue, ROUND(100.0*SUM(CASE WHEN segment='VIP' THEN gross_val ELSE 0 END)/SUM(gross_val),2) AS vip_share_pct FROM seg",
+      "answer": "In Q3 2025, France's gross revenue (not netted for returns, completed orders) was EUR 59,678.92, of which EUR 4,328.96 came from customers who were VIP segment at time of purchase -- a VIP share of about 7.25%.",
+      "at": "2026-08-21T19:46:33.652100+00:00"
+    }
+  ]
+}

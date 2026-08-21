@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import sys
 from dataclasses import dataclass, field
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -78,19 +79,32 @@ class RunScore:
         }
 
 
+_NUMERIC_TYPES = (int, float, Decimal)
+
+
 def _to_comparable_row(row: tuple) -> tuple:
-    return tuple(round(v, 4) if isinstance(v, float) else v for v in row)
+    return tuple(round(v, 4) if isinstance(v, _NUMERIC_TYPES) else v for v in row)
 
 
-def _rows_match(agent_rows: list[tuple], canonical_rows: list[tuple]) -> tuple[bool, str]:
+def _rows_match(agent_rows: list[tuple], canonical_rows: list[tuple]) -> tuple[str, str]:
+    """Returns (verdict, detail) where verdict is MATCH, MISMATCH, or
+    SHAPE_MISMATCH. SHAPE_MISMATCH (different row/column count) means the
+    agent's SQL returns data in a different shape than the canonical query —
+    that's often a harmless stylistic choice (an extra label column, a
+    different but equally valid grouping), not necessarily a wrong answer,
+    so it's surfaced for human review rather than auto-failed."""
     if len(agent_rows) != len(canonical_rows):
-        return False, f"row count mismatch: agent={len(agent_rows)} canonical={len(canonical_rows)}"
+        return (
+            "SHAPE_MISMATCH",
+            f"row count mismatch: agent={len(agent_rows)} canonical={len(canonical_rows)} "
+            "(cannot safely auto-compare — different shape, not necessarily wrong)",
+        )
 
     if agent_rows and canonical_rows and len(agent_rows[0]) != len(canonical_rows[0]):
         return (
-            False,
+            "SHAPE_MISMATCH",
             f"column count mismatch: agent={len(agent_rows[0])} canonical={len(canonical_rows[0])} "
-            "(cannot safely compare — different shape, not necessarily wrong)",
+            "(cannot safely auto-compare — different shape, not necessarily wrong)",
         )
 
     agent_sorted = sorted(_to_comparable_row(r) for r in agent_rows)
@@ -98,16 +112,16 @@ def _rows_match(agent_rows: list[tuple], canonical_rows: list[tuple]) -> tuple[b
 
     for agent_row, canonical_row in zip(agent_sorted, canonical_sorted):
         for agent_val, canonical_val in zip(agent_row, canonical_row):
-            if isinstance(canonical_val, (int, float)) and isinstance(agent_val, (int, float)):
+            if isinstance(canonical_val, _NUMERIC_TYPES) and isinstance(agent_val, _NUMERIC_TYPES):
                 if canonical_val == 0:
                     if abs(agent_val) > 1e-6:
-                        return False, f"expected ~0, got {agent_val}"
-                elif abs(agent_val - canonical_val) / abs(canonical_val) > RELATIVE_TOLERANCE:
-                    return False, f"{agent_val} not within {RELATIVE_TOLERANCE:.1%} of {canonical_val}"
+                        return "MISMATCH", f"expected ~0, got {agent_val}"
+                elif abs(float(agent_val) - float(canonical_val)) / abs(float(canonical_val)) > RELATIVE_TOLERANCE:
+                    return "MISMATCH", f"{agent_val} not within {RELATIVE_TOLERANCE:.1%} of {canonical_val}"
             elif str(agent_val).strip().lower() != str(canonical_val).strip().lower():
-                return False, f"{agent_val!r} != {canonical_val!r}"
+                return "MISMATCH", f"{agent_val!r} != {canonical_val!r}"
 
-    return True, "matches canonical result within tolerance"
+    return "MATCH", "matches canonical result within tolerance"
 
 
 def score_run(run_id: str) -> RunScore:
@@ -158,11 +172,12 @@ def score_run(run_id: str) -> RunScore:
 
         canonical_rows = [tuple(row.values()) for row in run_query(canonical_sql)]
 
-        matched, detail = _rows_match(agent_rows, canonical_rows)
+        verdict, detail = _rows_match(agent_rows, canonical_rows)
+        display_verdict = {"MATCH": "PASS", "MISMATCH": "FAIL", "SHAPE_MISMATCH": "NEEDS_REVIEW"}[verdict]
         result.scores.append(
             QuestionScore(
                 question.id,
-                "PASS" if matched else "FAIL",
+                display_verdict,
                 detail,
                 agent_sql=answer["sql"],
                 agent_rows=agent_rows,

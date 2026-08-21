@@ -21,7 +21,7 @@ from question_server.run_log import RunLog, load_run
 def build_server(condition_letter: str, run_id: str) -> MCPServer:
     condition = resolve_condition(condition_letter)
     context_bundle = load_context_bundle(condition)
-    run_log = RunLog(run_id=run_id, condition_letter=condition_letter)
+    run_log = RunLog.load_or_create(run_id, condition_letter)
 
     server = MCPServer(
         name="ossie-lab-question-server",

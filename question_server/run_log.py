@@ -61,6 +61,22 @@ class RunLog:
         path = RUNS_DIR / f"{self.run_id}.json"
         path.write_text(json.dumps(self.to_dict(), indent=2), encoding="utf-8")
 
+    @classmethod
+    def load_or_create(cls, run_id: str, condition_letter: str) -> "RunLog":
+        """Reconstructs a RunLog from its on-disk JSON if one already exists,
+        so a short-lived process (e.g. one CLI invocation per tool call) can
+        accumulate state across invocations instead of clobbering it."""
+        existing = load_run(run_id)
+        if existing is None:
+            return cls(run_id=run_id, condition_letter=condition_letter)
+        return cls(
+            run_id=run_id,
+            condition_letter=condition_letter,
+            queries=existing["queries"],
+            answers={a["question_id"]: a for a in existing["answers"]},
+            started_at=existing["started_at"],
+        )
+
 
 def load_run(run_id: str) -> dict[str, Any] | None:
     path = RUNS_DIR / f"{run_id}.json"

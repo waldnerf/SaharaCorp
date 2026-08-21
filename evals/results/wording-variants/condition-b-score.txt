@@ -1,0 +1,6 @@
+V1 (id 101): FAIL — 174425.53 not within 0.5% of 165879.7800
+V2 (id 102): FAIL — 179669.98 not within 0.5% of 165879.7800
+V3 (id 103): FAIL — 'Q1_2025' != 'Q1-2025'
+V4 (id 104): FAIL — 'Q1_2025' != 'Q1-2025'
+V5 (id 105): NEEDS_REVIEW — row count mismatch: agent=1 canonical=2 (cannot safely auto-compare — different shape, not necessarily wrong)
+V6 (id 106): NEEDS_REVIEW — row count mismatch: agent=1 canonical=2 (cannot safely auto-compare — different shape, not necessarily wrong)

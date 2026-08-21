@@ -10,7 +10,15 @@ import pytest
 
 from question_server.conditions import load_conditions
 from question_server.db import QueryRejected, run_query
+from question_server.run_log import RUNS_DIR
 from question_server.server import build_server
+
+
+@pytest.fixture(autouse=True)
+def _cleanup_run_logs():
+    yield
+    for path in RUNS_DIR.glob("test-*.json"):
+        path.unlink()
 
 
 def _call(server, tool_name, args=None):

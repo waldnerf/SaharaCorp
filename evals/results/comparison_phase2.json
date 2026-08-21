@@ -1,0 +1,320 @@
+{
+  "conditions": {
+    "D": {
+      "label": "Ossie + knowledge",
+      "counts": {
+        "PASS": 3,
+        "FAIL": 1,
+        "NEEDS_REVIEW": 16,
+        "MISSING": 0,
+        "ERROR": 0
+      },
+      "questions": [
+        {
+          "id": 1,
+          "verdict": "PASS",
+          "detail": "matches canonical result within tolerance"
+        },
+        {
+          "id": 2,
+          "verdict": "NEEDS_REVIEW",
+          "detail": "column count mismatch: agent=4 canonical=3 (cannot safely auto-compare \u2014 different shape, not necessarily wrong)"
+        },
+        {
+          "id": 3,
+          "verdict": "FAIL",
+          "detail": "datetime.datetime(2025, 1, 1, 0, 0) != 1"
+        },
+        {
+          "id": 4,
+          "verdict": "PASS",
+          "detail": "matches canonical result within tolerance"
+        },
+        {
+          "id": 5,
+          "verdict": "PASS",
+          "detail": "matches canonical result within tolerance"
+        },
+        {
+          "id": 6,
+          "verdict": "NEEDS_REVIEW",
+          "detail": "column count mismatch: agent=6 canonical=3 (cannot safely auto-compare \u2014 different shape, not necessarily wrong)"
+        },
+        {
+          "id": 7,
+          "verdict": "NEEDS_REVIEW",
+          "detail": "column count mismatch: agent=2 canonical=3 (cannot safely auto-compare \u2014 different shape, not necessarily wrong)"
+        },
+        {
+          "id": 8,
+          "verdict": "NEEDS_REVIEW",
+          "detail": "row count mismatch: agent=2 canonical=6 (cannot safely auto-compare \u2014 different shape, not necessarily wrong)"
+        },
+        {
+          "id": 9,
+          "verdict": "NEEDS_REVIEW",
+          "detail": "row count mismatch: agent=2 canonical=6 (cannot safely auto-compare \u2014 different shape, not necessarily wrong)"
+        },
+        {
+          "id": 10,
+          "verdict": "NEEDS_REVIEW",
+          "detail": "row count mismatch: agent=6 canonical=5 (cannot safely auto-compare \u2014 different shape, not necessarily wrong)"
+        },
+        {
+          "id": 11,
+          "verdict": "NEEDS_REVIEW",
+          "detail": "Level 3 (Policy) is open-ended \u2014 needs human/LLM-judge review"
+        },
+        {
+          "id": 12,
+          "verdict": "NEEDS_REVIEW",
+          "detail": "Level 3 (Policy) is open-ended \u2014 needs human/LLM-judge review"
+        },
+        {
+          "id": 13,
+          "verdict": "NEEDS_REVIEW",
+          "detail": "Level 3 (Policy) is open-ended \u2014 needs human/LLM-judge review"
+        },
+        {
+          "id": 14,
+          "verdict": "NEEDS_REVIEW",
+          "detail": "Level 3 (Policy) is open-ended \u2014 needs human/LLM-judge review"
+        },
+        {
+          "id": 15,
+          "verdict": "NEEDS_REVIEW",
+          "detail": "Level 3 (Policy) is open-ended \u2014 needs human/LLM-judge review"
+        },
+        {
+          "id": 16,
+          "verdict": "NEEDS_REVIEW",
+          "detail": "Level 4 (Action / optimization) is open-ended \u2014 needs human/LLM-judge review"
+        },
+        {
+          "id": 17,
+          "verdict": "NEEDS_REVIEW",
+          "detail": "Level 4 (Action / optimization) is open-ended \u2014 needs human/LLM-judge review"
+        },
+        {
+          "id": 18,
+          "verdict": "NEEDS_REVIEW",
+          "detail": "Level 4 (Action / optimization) is open-ended \u2014 needs human/LLM-judge review"
+        },
+        {
+          "id": 19,
+          "verdict": "NEEDS_REVIEW",
+          "detail": "Level 4 (Action / optimization) is open-ended \u2014 needs human/LLM-judge review"
+        },
+        {
+          "id": 20,
+          "verdict": "NEEDS_REVIEW",
+          "detail": "Level 4 (Action / optimization) is open-ended \u2014 needs human/LLM-judge review"
+        }
+      ]
+    },
+    "E": {
+      "label": "Glossary + Ossie + knowledge",
+      "counts": {
+        "PASS": 3,
+        "FAIL": 2,
+        "NEEDS_REVIEW": 15,
+        "MISSING": 0,
+        "ERROR": 0
+      },
+      "questions": [
+        {
+          "id": 1,
+          "verdict": "PASS",
+          "detail": "matches canonical result within tolerance"
+        },
+        {
+          "id": 2,
+          "verdict": "NEEDS_REVIEW",
+          "detail": "column count mismatch: agent=4 canonical=3 (cannot safely auto-compare \u2014 different shape, not necessarily wrong)"
+        },
+        {
+          "id": 3,
+          "verdict": "FAIL",
+          "detail": "datetime.datetime(2025, 1, 1, 0, 0) != 1"
+        },
+        {
+          "id": 4,
+          "verdict": "PASS",
+          "detail": "matches canonical result within tolerance"
+        },
+        {
+          "id": 5,
+          "verdict": "FAIL",
+          "detail": "2188 not within 0.5% of 2259"
+        },
+        {
+          "id": 6,
+          "verdict": "NEEDS_REVIEW",
+          "detail": "column count mismatch: agent=6 canonical=3 (cannot safely auto-compare \u2014 different shape, not necessarily wrong)"
+        },
+        {
+          "id": 7,
+          "verdict": "PASS",
+          "detail": "matches canonical result within tolerance"
+        },
+        {
+          "id": 8,
+          "verdict": "NEEDS_REVIEW",
+          "detail": "column count mismatch: agent=4 canonical=3 (cannot safely auto-compare \u2014 different shape, not necessarily wrong)"
+        },
+        {
+          "id": 9,
+          "verdict": "NEEDS_REVIEW",
+          "detail": "column count mismatch: agent=5 canonical=3 (cannot safely auto-compare \u2014 different shape, not necessarily wrong)"
+        },
+        {
+          "id": 10,
+          "verdict": "NEEDS_REVIEW",
+          "detail": "row count mismatch: agent=6 canonical=5 (cannot safely auto-compare \u2014 different shape, not necessarily wrong)"
+        },
+        {
+          "id": 11,
+          "verdict": "NEEDS_REVIEW",
+          "detail": "Level 3 (Policy) is open-ended \u2014 needs human/LLM-judge review"
+        },
+        {
+          "id": 12,
+          "verdict": "NEEDS_REVIEW",
+          "detail": "Level 3 (Policy) is open-ended \u2014 needs human/LLM-judge review"
+        },
+        {
+          "id": 13,
+          "verdict": "NEEDS_REVIEW",
+          "detail": "Level 3 (Policy) is open-ended \u2014 needs human/LLM-judge review"
+        },
+        {
+          "id": 14,
+          "verdict": "NEEDS_REVIEW",
+          "detail": "Level 3 (Policy) is open-ended \u2014 needs human/LLM-judge review"
+        },
+        {
+          "id": 15,
+          "verdict": "NEEDS_REVIEW",
+          "detail": "Level 3 (Policy) is open-ended \u2014 needs human/LLM-judge review"
+        },
+        {
+          "id": 16,
+          "verdict": "NEEDS_REVIEW",
+          "detail": "Level 4 (Action / optimization) is open-ended \u2014 needs human/LLM-judge review"
+        },
+        {
+          "id": 17,
+          "verdict": "NEEDS_REVIEW",
+          "detail": "Level 4 (Action / optimization) is open-ended \u2014 needs human/LLM-judge review"
+        },
+        {
+          "id": 18,
+          "verdict": "NEEDS_REVIEW",
+          "detail": "Level 4 (Action / optimization) is open-ended \u2014 needs human/LLM-judge review"
+        },
+        {
+          "id": 19,
+          "verdict": "NEEDS_REVIEW",
+          "detail": "Level 4 (Action / optimization) is open-ended \u2014 needs human/LLM-judge review"
+        },
+        {
+          "id": 20,
+          "verdict": "NEEDS_REVIEW",
+          "detail": "Level 4 (Action / optimization) is open-ended \u2014 needs human/LLM-judge review"
+        }
+      ]
+    }
+  },
+  "wording_variants": {
+    "A": [
+      {
+        "id": 101,
+        "label": "V1",
+        "verdict": "FAIL",
+        "detail": "174425.53 not within 0.5% of 165879.7800"
+      },
+      {
+        "id": 102,
+        "label": "V2",
+        "verdict": "FAIL",
+        "detail": "179669.98 not within 0.5% of 165879.7800"
+      },
+      {
+        "id": 103,
+        "label": "V3",
+        "verdict": "FAIL",
+        "detail": "'Q1_2025' != 'Q1-2025'"
+      },
+      {
+        "id": 104,
+        "label": "V4",
+        "verdict": "FAIL",
+        "detail": "'Q1_2025' != 'Q1-2025'"
+      },
+      {
+        "id": 105,
+        "label": "V5",
+        "verdict": "NEEDS_REVIEW",
+        "detail": "row count mismatch: agent=1 canonical=2 (cannot safely auto-compare \u2014 different shape, not necessarily wrong)"
+      },
+      {
+        "id": 106,
+        "label": "V6",
+        "verdict": "NEEDS_REVIEW",
+        "detail": "row count mismatch: agent=1 canonical=2 (cannot safely auto-compare \u2014 different shape, not necessarily wrong)"
+      }
+    ],
+    "B": [
+      {
+        "id": 101,
+        "label": "V1",
+        "verdict": "FAIL",
+        "detail": "174425.53 not within 0.5% of 165879.7800"
+      },
+      {
+        "id": 102,
+        "label": "V2",
+        "verdict": "FAIL",
+        "detail": "179669.98 not within 0.5% of 165879.7800"
+      },
+      {
+        "id": 103,
+        "label": "V3",
+        "verdict": "FAIL",
+        "detail": "'Q1_2025' != 'Q1-2025'"
+      },
+      {
+        "id": 104,
+        "label": "V4",
+        "verdict": "FAIL",
+        "detail": "'Q1_2025' != 'Q1-2025'"
+      },
+      {
+        "id": 105,
+        "label": "V5",
+        "verdict": "NEEDS_REVIEW",
+        "detail": "row count mismatch: agent=1 canonical=2 (cannot safely auto-compare \u2014 different shape, not necessarily wrong)"
+      },
+      {
+        "id": 106,
+        "label": "V6",
+        "verdict": "NEEDS_REVIEW",
+        "detail": "row count mismatch: agent=1 canonical=2 (cannot safely auto-compare \u2014 different shape, not necessarily wrong)"
+      }
+    ]
+  },
+  "findings": [
+    {
+      "title": "New trap discovered: line_discount_pct scale assumption",
+      "detail": "Both Condition A and Condition B independently wrote `(1 - oi.line_discount_pct/100.0)` in their revenue SQL for the wording-variant questions \u2014 dividing by 100 as if the column were a 0-100 percentage. The actual data is a 0-1 fraction (max observed value 0.15, i.e. 15%). Dividing by 100 again shrinks the discount factor to near-zero, overstating revenue by roughly the size of the true discount. Condition C/D/E's Ossie metric expression uses `(1 - order_items.line_discount_pct)` directly and does not have this failure mode. This is a genuinely new trap surfaced by Phase 2c, not one of the original 5 or the discount-cost trap from Phase 1 \u2014 it's about column *scale*, not join logic or netting."
+    },
+    {
+      "title": "Explicit wording did not fix the scale bug",
+      "detail": "The wording-ambiguity hypothesis predicted that explicit 'net of returns' wording (V1/V3/V5) should make A and B converge on the correct value. It didn't, for V1/V3: both conditions used the identical wrong line_discount_pct/100.0 expression on both the explicit and ambiguous variants alike. Wording ambiguity and the discount-scale assumption are separate, independent failure modes \u2014 fixing one does not fix the other."
+    },
+    {
+      "title": "Automated scoring caveat for D/E",
+      "detail": "A large share of D/E's Level 1-2 questions scored NEEDS_REVIEW rather than PASS/FAIL because the agent's SQL returned a different column/row shape than the canonical query (e.g. an extra label column, or a different but valid grouping) \u2014 scripts/score_run.py cannot safely auto-compare those without risking false FAILs, so it flags them for human read rather than guessing. This means D/E's automated PASS count understates how many questions were actually answered correctly; a human pass over the NEEDS_REVIEW rows in evals/results/runs/d-run1.json and e-run1.json would give a truer picture than the raw tally."
+    }
+  ]
+}

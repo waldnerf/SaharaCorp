@@ -125,7 +125,121 @@ def build() -> dict:
     }
 
 
-def build_html(data: dict) -> None:
+def build_phase2() -> dict:
+    """Assembles Phase 2 results (Conditions D/E, wording variants against
+    A/B) from the run logs the question-server produced, scored via
+    scripts.score_run / scripts.score_variant_run. Unlike Phase 1's data
+    (hand-verified and transcribed into comparison.md), this is scored
+    directly from evals/results/runs/*.json — no human transcription step,
+    which is the whole point of Phase 2's automation."""
+    import shutil
+
+    from question_server.run_log import RUNS_DIR
+    from scripts.score_run import score_run
+    from scripts.score_variant_run import score_variant_run
+
+    # evals/results/runs/ is gitignored scratch space; the durable copies
+    # live under evals/results/condition-{d,e}/run.json and
+    # evals/results/wording-variants/condition-{a,b}-run.json. Restore the
+    # scratch copies from those before scoring, so this function works even
+    # right after a fresh checkout with no evals/results/runs/ directory.
+    RUNS_DIR.mkdir(parents=True, exist_ok=True)
+    for src, run_id in [
+        (RESULTS_DIR / "condition-d" / "run.json", "d-run1"),
+        (RESULTS_DIR / "condition-e" / "run.json", "e-run1"),
+        (RESULTS_DIR / "wording-variants" / "condition-a-run.json", "a-variants-run1"),
+        (RESULTS_DIR / "wording-variants" / "condition-b-run.json", "b-variants-run1"),
+    ]:
+        dest = RUNS_DIR / f"{run_id}.json"
+        if src.exists() and not dest.exists():
+            shutil.copy(src, dest)
+
+    def summarize(scores) -> dict:
+        counts = {"PASS": 0, "FAIL": 0, "NEEDS_REVIEW": 0, "MISSING": 0, "ERROR": 0}
+        for s in scores:
+            counts[s.verdict] += 1
+        return counts
+
+    d_score = score_run("d-run1")
+    e_score = score_run("e-run1")
+
+    a_variants = score_variant_run("a-variants-run1")
+    b_variants = score_variant_run("b-variants-run1")
+
+    return {
+        "conditions": {
+            "D": {
+                "label": "Ossie + knowledge",
+                "counts": summarize(d_score.scores),
+                "questions": [
+                    {"id": s.question_id, "verdict": s.verdict, "detail": s.detail} for s in d_score.scores
+                ],
+            },
+            "E": {
+                "label": "Glossary + Ossie + knowledge",
+                "counts": summarize(e_score.scores),
+                "questions": [
+                    {"id": s.question_id, "verdict": s.verdict, "detail": s.detail} for s in e_score.scores
+                ],
+            },
+        },
+        "wording_variants": {
+            "A": a_variants,
+            "B": b_variants,
+        },
+        "findings": [
+            {
+                "title": "New trap discovered: line_discount_pct scale assumption",
+                "detail": (
+                    "Both Condition A and Condition B independently wrote "
+                    "`(1 - oi.line_discount_pct/100.0)` in their revenue SQL for "
+                    "the wording-variant questions — dividing by 100 as if the "
+                    "column were a 0-100 percentage. The actual data is a 0-1 "
+                    "fraction (max observed value 0.15, i.e. 15%). Dividing by "
+                    "100 again shrinks the discount factor to near-zero, "
+                    "overstating revenue by roughly the size of the true "
+                    "discount. Condition C/D/E's Ossie metric expression uses "
+                    "`(1 - order_items.line_discount_pct)` directly and does not "
+                    "have this failure mode. This is a genuinely new trap "
+                    "surfaced by Phase 2c, not one of the original 5 or the "
+                    "discount-cost trap from Phase 1 — it's about column *scale*, "
+                    "not join logic or netting."
+                ),
+            },
+            {
+                "title": "Explicit wording did not fix the scale bug",
+                "detail": (
+                    "The wording-ambiguity hypothesis predicted that explicit "
+                    "'net of returns' wording (V1/V3/V5) should make A and B "
+                    "converge on the correct value. It didn't, for V1/V3: both "
+                    "conditions used the identical wrong "
+                    "line_discount_pct/100.0 expression on both the explicit "
+                    "and ambiguous variants alike. Wording ambiguity and the "
+                    "discount-scale assumption are separate, independent "
+                    "failure modes — fixing one does not fix the other."
+                ),
+            },
+            {
+                "title": "Automated scoring caveat for D/E",
+                "detail": (
+                    "A large share of D/E's Level 1-2 questions scored "
+                    "NEEDS_REVIEW rather than PASS/FAIL because the agent's SQL "
+                    "returned a different column/row shape than the canonical "
+                    "query (e.g. an extra label column, or a different but "
+                    "valid grouping) — scripts/score_run.py cannot safely "
+                    "auto-compare those without risking false FAILs, so it "
+                    "flags them for human read rather than guessing. This means "
+                    "D/E's automated PASS count understates how many questions "
+                    "were actually answered correctly; a human pass over the "
+                    "NEEDS_REVIEW rows in evals/results/runs/d-run1.json and "
+                    "e-run1.json would give a truer picture than the raw tally."
+                ),
+            },
+        ],
+    }
+
+
+def build_html(data: dict, phase2_data: dict) -> None:
     """Injects comparison.json into docs/comparison.html.template, producing
     docs/comparison.html — the single interactive file, self-contained (JSON
     embedded inline) so it opens directly via file:// with no build step or
@@ -133,10 +247,16 @@ def build_html(data: dict) -> None:
     template_path = REPO_ROOT / "docs" / "comparison.html.template"
     out_path = REPO_ROOT / "docs" / "comparison.html"
     template = template_path.read_text(encoding="utf-8")
-    # Defense in depth: the HTML parser ends a <script> block on any literal
-    # "</script" regardless of the script's type, even inside a JSON payload.
-    json_text = json.dumps(data).replace("</script", "<\\/script")
-    html = template.replace("__COMPARISON_DATA__", json_text)
+
+    def embed(marker: str, payload: dict) -> str:
+        # Defense in depth: the HTML parser ends a <script> block on any
+        # literal "</script" regardless of the script's type, even inside a
+        # JSON payload.
+        json_text = json.dumps(payload).replace("</script", "<\\/script")
+        return json_text
+
+    html = template.replace("__COMPARISON_DATA__", embed("__COMPARISON_DATA__", data))
+    html = html.replace("__PHASE2_DATA__", embed("__PHASE2_DATA__", phase2_data))
     out_path.write_text(html, encoding="utf-8")
     print(f"Wrote {out_path}")
 
@@ -151,7 +271,14 @@ def main() -> None:
     out_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
     print(f"Wrote {out_path} ({len(data['questions'])} questions x {len(data['conditions'])} conditions)")
 
-    build_html(data)
+    phase2_runs_exist = (RESULTS_DIR / "condition-d" / "run.json").exists()
+    phase2_data = build_phase2() if phase2_runs_exist else {"conditions": {}, "wording_variants": {}, "findings": []}
+    if phase2_runs_exist:
+        phase2_path = RESULTS_DIR / "comparison_phase2.json"
+        phase2_path.write_text(json.dumps(phase2_data, indent=2), encoding="utf-8")
+        print(f"Wrote {phase2_path}")
+
+    build_html(data, phase2_data)
 
 
 if __name__ == "__main__":
