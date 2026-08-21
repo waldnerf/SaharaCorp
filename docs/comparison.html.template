@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Context Layer Lab — Phase 1 Comparison</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    --bg: #ffffff;
+    --bg-alt: #f6f7f9;
+    --border: #e1e4e8;
+    --text: #1f2328;
+    --text-dim: #57606a;
+    --pass: #2da44e;
+    --pass-bg: #dafbe1;
+    --fail: #cf222e;
+    --fail-bg: #ffebe9;
+    --partial: #9a6700;
+    --partial-bg: #fff8c5;
+    --accent: #0969da;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+  }
+  header {
+    padding: 24px 32px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  h1 { margin: 0 0 4px; font-size: 1.4rem; }
+  .subtitle { color: var(--text-dim); font-size: 0.9rem; }
+  main { padding: 24px 32px 64px; max-width: 1100px; margin: 0 auto; }
+
+  .tallies {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+  }
+  .tally-card {
+    flex: 1;
+    min-width: 200px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 16px;
+    background: var(--bg-alt);
+  }
+  .tally-card h3 { margin: 0 0 8px; font-size: 0.95rem; }
+  .tally-bar {
+    display: flex;
+    height: 10px;
+    border-radius: 5px;
+    overflow: hidden;
+    margin-bottom: 6px;
+  }
+  .tally-bar span { display: block; height: 100%; }
+  .tally-numbers { font-size: 0.8rem; color: var(--text-dim); }
+
+  .controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+  .controls span.label { font-size: 0.85rem; color: var(--text-dim); margin-right: 4px; }
+  button.trap-filter {
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    border-radius: 999px;
+    padding: 4px 12px;
+    font-size: 0.8rem;
+    cursor: pointer;
+  }
+  button.trap-filter.active {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+  }
+
+  table.grid {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+    margin-bottom: 24px;
+  }
+  table.grid th, table.grid td {
+    border: 1px solid var(--border);
+    padding: 6px 8px;
+    text-align: left;
+  }
+  table.grid th { background: var(--bg-alt); font-weight: 600; }
+  table.grid td.q-text { max-width: 420px; }
+  table.grid td.q-id { white-space: nowrap; color: var(--text-dim); }
+  table.grid tr.hidden { display: none; }
+  td.verdict-cell {
+    cursor: pointer;
+    text-align: center;
+    font-weight: 600;
+    width: 90px;
+    transition: filter 0.1s;
+  }
+  td.verdict-cell:hover { filter: brightness(0.95); }
+  td.verdict-cell.PASS { background: var(--pass-bg); color: var(--pass); }
+  td.verdict-cell.FAIL { background: var(--fail-bg); color: var(--fail); }
+  td.verdict-cell.PARTIAL { background: var(--partial-bg); color: var(--partial); }
+
+  .traps-badge {
+    font-size: 0.72rem;
+    color: var(--text-dim);
+  }
+
+  #detail {
+    position: fixed;
+    top: 0; right: 0; bottom: 0;
+    width: 420px;
+    max-width: 90vw;
+    background: var(--bg);
+    border-left: 1px solid var(--border);
+    box-shadow: -8px 0 24px rgba(0,0,0,0.08);
+    transform: translateX(100%);
+    transition: transform 0.18s ease-out;
+    overflow-y: auto;
+    padding: 20px;
+    font-size: 0.85rem;
+  }
+  #detail.open { transform: translateX(0); }
+  #detail h2 { font-size: 1rem; margin-top: 0; padding-right: 28px; }
+  #detail .close-btn {
+    position: fixed; top: 16px; right: 16px;
+    border: none; background: var(--bg); font-size: 1.2rem; cursor: pointer; color: var(--text-dim);
+    width: 28px; height: 28px; border-radius: 50%; line-height: 1;
+    display: none;
+  }
+  #detail.open .close-btn { display: block; }
+  #detail .verdict-tag {
+    display: inline-block;
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-weight: 600;
+    font-size: 0.75rem;
+    margin-bottom: 12px;
+  }
+  #detail .verdict-tag.PASS { background: var(--pass-bg); color: var(--pass); }
+  #detail .verdict-tag.FAIL { background: var(--fail-bg); color: var(--fail); }
+  #detail .verdict-tag.PARTIAL { background: var(--partial-bg); color: var(--partial); }
+  #detail section { margin-bottom: 16px; }
+  #detail section h4 {
+    margin: 0 0 6px;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-dim);
+  }
+  #detail pre {
+    background: var(--bg-alt);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 0.78rem;
+  }
+  #overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.15);
+    display: none;
+  }
+  #overlay.open { display: block; }
+
+  footer {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 0 32px 40px;
+    color: var(--text-dim);
+    font-size: 0.8rem;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Context Layer Lab — Phase 1 Comparison</h1>
+  <div class="subtitle">
+    20 questions &times; 3 conditions (schema-naming-tightened rerun). Click any cell for the condition's actual SQL and answer.
+  </div>
+</header>
+
+<main>
+  <div class="tallies" id="tallies"></div>
+
+  <div class="controls" id="controls">
+    <span class="label">Filter by trap:</span>
+  </div>
+
+  <table class="grid" id="grid">
+    <thead>
+      <tr>
+        <th style="width: 40px;">Q</th>
+        <th>Question</th>
+        <th style="width: 90px;">A</th>
+        <th style="width: 90px;">B</th>
+        <th style="width: 90px;">C</th>
+      </tr>
+    </thead>
+    <tbody id="grid-body"></tbody>
+  </table>
+</main>
+
+<footer>
+  Data generated by <code>scripts/build_comparison_data.py</code> from
+  <code>evals/results/comparison.md</code>, <code>evals/results/condition-{a,b,c}/transcript.md</code>,
+  and <code>evals/expected.md</code>. Regenerate after any condition rerun — never hand-edit
+  <code>evals/results/comparison.json</code>.
+</footer>
+
+<div id="overlay"></div>
+<div id="detail">
+  <button class="close-btn" onclick="closeDetail()">&times;</button>
+  <div id="detail-content"></div>
+</div>
+
+<script type="application/json" id="comparison-data">__COMPARISON_DATA__</script>
+<script>
+const DATA = JSON.parse(document.getElementById('comparison-data').textContent);
+let activeTrap = null;
+
+function renderTallies() {
+  const el = document.getElementById('tallies');
+  el.innerHTML = '';
+  for (const cond of DATA.conditions) {
+    const t = DATA.tally[cond];
+    const total = t.PASS + t.PARTIAL + t.FAIL;
+    const card = document.createElement('div');
+    card.className = 'tally-card';
+    card.innerHTML = `
+      <h3>Condition ${cond} — ${DATA.condition_labels[cond]}</h3>
+      <div class="tally-bar">
+        <span style="width:${t.PASS/total*100}%; background:var(--pass)"></span>
+        <span style="width:${t.PARTIAL/total*100}%; background:var(--partial)"></span>
+        <span style="width:${t.FAIL/total*100}%; background:var(--fail)"></span>
+      </div>
+      <div class="tally-numbers">${t.PASS} PASS &middot; ${t.PARTIAL} PARTIAL &middot; ${t.FAIL} FAIL</div>
+    `;
+    el.appendChild(card);
+  }
+}
+
+function renderTrapFilters() {
+  const controls = document.getElementById('controls');
+  const allTraps = new Set();
+  DATA.questions.forEach(q => q.traps.forEach(t => allTraps.add(t)));
+  const sorted = Array.from(allTraps).sort((a,b) => a-b);
+
+  const allBtn = document.createElement('button');
+  allBtn.className = 'trap-filter active';
+  allBtn.textContent = 'All';
+  allBtn.onclick = () => setTrapFilter(null, allBtn);
+  controls.appendChild(allBtn);
+
+  sorted.forEach(trap => {
+    const btn = document.createElement('button');
+    btn.className = 'trap-filter';
+    btn.textContent = `Trap ${trap}`;
+    btn.onclick = () => setTrapFilter(trap, btn);
+    controls.appendChild(btn);
+  });
+}
+
+function setTrapFilter(trap, btn) {
+  activeTrap = trap;
+  document.querySelectorAll('.trap-filter').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderGrid();
+}
+
+function renderGrid() {
+  const body = document.getElementById('grid-body');
+  body.innerHTML = '';
+  DATA.questions.forEach(q => {
+    if (activeTrap !== null && !q.traps.includes(activeTrap)) return;
+    const tr = document.createElement('tr');
+    const trapLabel = q.traps.length ? `<span class="traps-badge">Trap ${q.traps.join(', ')}</span>` : '';
+    tr.innerHTML = `
+      <td class="q-id">Q${q.id}</td>
+      <td class="q-text">${q.text} ${trapLabel}</td>
+    `;
+    for (const cond of DATA.conditions) {
+      const cell = q.conditions[cond];
+      const td = document.createElement('td');
+      td.className = `verdict-cell ${cell.verdict}`;
+      td.textContent = cell.verdict;
+      td.onclick = () => openDetail(q, cond);
+      tr.appendChild(td);
+    }
+    body.appendChild(tr);
+  });
+}
+
+function openDetail(q, cond) {
+  const cell = q.conditions[cond];
+  const content = document.getElementById('detail-content');
+  content.innerHTML = `
+    <h2>Q${q.id} &middot; Condition ${cond}</h2>
+    <span class="verdict-tag ${cell.verdict}">${cell.verdict}</span>
+    <section>
+      <h4>Question</h4>
+      <div>${q.text}</div>
+    </section>
+    <section>
+      <h4>Condition ${cond}'s SQL</h4>
+      <pre>${escapeHtml(cell.sql || '(not extracted)')}</pre>
+    </section>
+    <section>
+      <h4>Condition ${cond}'s answer</h4>
+      <div>${escapeHtml(cell.answer || '(not extracted)')}</div>
+    </section>
+    <section>
+      <h4>Expected (ground truth)</h4>
+      <div>${escapeHtml(q.expected || '(see evals/expected.md)')}</div>
+    </section>
+    <section>
+      <h4>Scoring note</h4>
+      <div>${escapeHtml(q.note)}</div>
+    </section>
+  `;
+  document.getElementById('detail').classList.add('open');
+  document.getElementById('overlay').classList.add('open');
+}
+
+function closeDetail() {
+  document.getElementById('detail').classList.remove('open');
+  document.getElementById('overlay').classList.remove('open');
+}
+document.getElementById('overlay').onclick = closeDetail;
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+renderTallies();
+renderTrapFilters();
+renderGrid();
+</script>
+</body>
+</html>

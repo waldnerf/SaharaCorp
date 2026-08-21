@@ -120,12 +120,23 @@ ossie-lab/
 │   └── retail.ossie.yaml       # Ossie semantic model: entities, metrics, dimensions, relations
 │
 ├── context/
-│   └── glossary.md             # Plain-language business term definitions
+│   ├── glossary.md             # Plain-language business term definitions
+│   └── company.yaml            # Business model, priorities, KPIs (Condition E only)
+│
+├── knowledge/                   # Phase 2: plain-language policy docs (Conditions D/E)
+│   ├── discount_cost_policy.md
+│   ├── revenue_recognition_policy.md
+│   ├── pricing_snapshot_policy.md
+│   └── segment_attribution_policy.md
 │
 ├── evals/
 │   ├── questions.md            # 20 graduated questions (levels 1-4)
 │   ├── expected.md             # Hand-verified expected SQL/answers
+│   ├── conditions.yaml         # Phase 2: condition A-E → context file definitions
 │   └── results/                # Per-condition run outputs (SQL + answer + notes)
+│
+├── question_server/             # Phase 2: MCP server that funnels the eval loop
+│                                 # as structured tool calls (see §7, §10)
 │
 └── README.md
 ```
@@ -163,6 +174,21 @@ ossie-lab/
 **Feature (Phase 2): `/run-eval` skill**
 - Automates: load `evals/questions.md` → assemble context for a named condition → run Claude Code → capture generated SQL + answer → execute SQL against DuckDB → compare result to `expected.md` → score → write report to `evals/results/`
 - Explicitly deferred until failure modes from the manual run are understood, per the "manual before automated" principle
+- Phase 1's manual runs used a git-worktree + `Agent` tool pattern with a markdown transcript as the capture format; Phase 2 replaces that capture mechanism with the MCP question-server below, so `/run-eval` becomes an orchestrator around the server rather than a transcript-parsing pipeline
+
+**Feature (Phase 2): MCP question-server**
+- A Model Context Protocol server (`question_server/`) that funnels the eval loop through structured tool calls instead of a markdown task prompt + free-form transcript, so the agent under test interacts with the lab entirely through typed function calls
+- **Condition isolation moves from the filesystem to the server boundary.** Phase 1's conditions were defined by which files were visible in a worktree (PRD §6 "Condition isolation"); each MCP server instance is instead launched bound to exactly one condition's context bundle (glossary / Ossie model / knowledge docs), and the agent under test only ever sees the tools and data that instance chooses to expose. Same isolation principle as Phase 1, implemented as a capability boundary instead of a file-visibility boundary — no condition name or hint is ever exposed to the agent through either mechanism.
+- This directly resolves a risk the Phase 2 plan already flagged: `scripts/score_run.py` has to regex-parse free-form markdown transcripts, and Phase 1's three transcripts were not even structurally consistent with one another. `submit_answer` (below) makes the scorer's job "diff a stored value" instead of "extract a value from prose."
+- **Exposed functions:**
+  - `list_questions(level?)` → `[{id, text}]` — condition-blind, no schema hints, sourced from `evals/questions.md`
+  - `get_question(id)` → single question's text
+  - `query_database(sql)` → read-only execution against `retail.duckdb`; every call is logged per question, giving `comparison.md`-style failure-mode analysis a structured trace instead of a hand-reconstructed one
+  - `get_schema()` → table/column listing (condition-invariant — equivalent to `DESCRIBE`)
+  - `get_context_bundle()` → whatever combination of glossary / Ossie model / knowledge docs this server instance was configured to expose for its condition
+  - `submit_answer(question_id, sql, answer)` → records a structured per-question answer, replacing free-form transcript capture as `/run-eval`'s scoring input
+  - `export_run(run_id)` → **operator-only, not exposed to the agent under test** — structured JSON of a full run's questions, SQL, and answers, consumed directly by `scripts/score_run.py`
+- Supersedes the transcript-capture half of Phase 2e's originally-scoped `/run-eval` skill: `/run-eval` becomes "launch the right server instance for a condition, spawn a fresh agent against it, call `export_run`, score" rather than "assemble a worktree, run a prompt, parse the resulting markdown"
 
 ## 8. Technology Stack
 
@@ -172,7 +198,7 @@ ossie-lab/
 - **Data generation:** scripted (Python or SQL) generation from the business model definition — exact tooling TBD at implementation time
 - **Repo/version control:** git (this repo)
 - **Documentation/context files:** Markdown (glossary, knowledge, questions, expected answers), YAML (company/semantic definitions)
-- **Phase 2 automation:** likely a Claude Code skill (`/run-eval`) invoking DuckDB via CLI or a thin Python harness — no new infra required
+- **Phase 2 automation:** a Claude Code skill (`/run-eval`) that launches a per-condition **MCP question-server** (`question_server/`, Python MCP SDK) and spawns a fresh agent against it — no new infra required, the server runs locally alongside DuckDB like everything else in the lab
 
 No external services, cloud infrastructure, or third-party semantic layer products are required for the MVP.
 
@@ -188,7 +214,21 @@ No external services, cloud infrastructure, or third-party semantic layer produc
 
 ## 10. API Specification
 
-Not applicable for MVP — there is no API surface. All interaction is via Claude Code sessions reading/writing local repo files and querying a local DuckDB file directly. If the Phase 2 `/run-eval` skill exposes a programmatic interface, it will be specified at that time.
+Not applicable for MVP — there is no API surface. All interaction is via Claude Code sessions reading/writing local repo files and querying a local DuckDB file directly.
+
+**Phase 2 addendum — MCP question-server (`question_server/`):** the first programmatic interface the lab exposes, per §7's "MCP question-server" feature. One server process = one bound condition; the condition is chosen by the operator at launch (e.g. via a config/env var naming which context bundle to load), never by the agent under test and never exposed in a tool's name or description.
+
+| Function | Caller | Request | Response | Notes |
+|---|---|---|---|---|
+| `list_questions(level?)` | agent under test | optional level filter (1-4) | `[{id, text}]` | condition-blind, no schema hints |
+| `get_question(id)` | agent under test | question id | `{id, text, level}` | |
+| `get_schema()` | agent under test | — | table/column listing | condition-invariant, equivalent to `DESCRIBE` |
+| `query_database(sql)` | agent under test | read-only SQL | rows | executes against `retail.duckdb`; every call logged per question |
+| `get_context_bundle()` | agent under test | — | whatever glossary/Ossie/knowledge content this instance is configured to expose | empty for Condition A |
+| `submit_answer(question_id, sql, answer)` | agent under test | question id, final SQL, final answer | ack | structured record, one per question per run |
+| `export_run(run_id)` | operator / `/run-eval` only | run id | structured JSON of the full run | not exposed to the agent under test; feeds `scripts/score_run.py` |
+
+Design constraints carried over from Phase 1's condition-isolation pattern: the tool list and `get_context_bundle()`'s contents are the *only* condition signal a server instance carries — no tool name, description, or error message may reveal which condition (A-E) is active.
 
 ## 11. Success Criteria
 
@@ -236,10 +276,11 @@ Not applicable for MVP — there is no API surface. All interaction is via Claud
 **Deliverables:**
 - ✅ `knowledge/*.md` policy/rationale documents (e.g., `revenue_policy.md`, `pricing_policy.md`)
 - ✅ Conditions D (Ossie + knowledge) and E (full context layer as defined at this stage)
-- ✅ `/run-eval` Claude Code skill: load questions → assemble condition context → run → score → report
+- ✅ MCP question-server (`question_server/`) exposing `list_questions`, `get_question`, `get_schema`, `query_database`, `get_context_bundle`, `submit_answer`, `export_run` (see §7, §10), with condition isolation enforced by which tools/data a given server instance exposes
+- ✅ `/run-eval` Claude Code skill: resolve a condition → launch the matching MCP question-server instance → spawn a fresh agent against it → call `export_run` → score against `expected.md` → report
 - ✅ Re-run all conditions (A–E) via the automated pipeline for consistency with Phase 1's manual baseline
 
-**Validation:** Automated scores for Conditions A–C match the Phase 1 manual scores (confirms the automation is faithful), and D/E show measurable improvement on Level 3–4 questions specifically.
+**Validation:** Automated scores for Conditions A–C match the Phase 1 manual scores (confirms the automation is faithful), and D/E show measurable improvement on Level 3–4 questions specifically. Additionally: a condition run through the MCP server produces the same score as Phase 1's manual, transcript-based run for the same condition — confirming the new capture mechanism doesn't change what's being measured, only how it's captured.
 
 ### Phase 3 — Process context + business-model-first generator
 **Goal:** Generalize from "one hand-built retail company" to a repeatable pipeline that can generate new synthetic enterprises.

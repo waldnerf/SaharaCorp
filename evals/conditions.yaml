@@ -1,0 +1,77 @@
+# Condition definitions for the Context Layer Lab.
+#
+# Each condition names the exact set of context files a run is allowed to
+# see. This file is the single source of truth for condition isolation —
+# both the git-worktree-based Phase 1 process and the Phase 2 MCP
+# question-server read it, so the two mechanisms can never define a
+# condition differently.
+#
+# `context_files` are paths relative to the repo root. `schema_only: true`
+# means the run sees table/column names and types only (via get_schema),
+# with no semantic, business, or knowledge-layer content at all.
+#
+# The task prompt (CLAUDE.md) and evals/questions.md are visible in every
+# condition and are never listed here — they are condition-blind by
+# design.
+
+conditions:
+  A:
+    label: "Schema only"
+    description: >
+      Baseline. The agent sees only the raw DuckDB schema (table/column
+      names and types) — no glossary, no semantic model, no knowledge docs.
+    schema_only: true
+    context_files: []
+
+  B:
+    label: "Schema + glossary"
+    description: >
+      Adds a plain-language business glossary defining terms like revenue,
+      margin, and customer segment — but no formal metric definitions or
+      join logic.
+    schema_only: true
+    context_files:
+      - context/glossary.md
+
+  C:
+    label: "Schema + Ossie semantic model"
+    description: >
+      Adds the Ossie semantic model, which encodes precise metric
+      expressions (revenue, net_cost, margin, ...), relationships, and
+      inline ai_context notes on traps — but no separate knowledge-layer
+      policy docs and no business-priorities context.
+    schema_only: true
+    context_files:
+      - semantic/retail.ossie.yaml
+
+  D:
+    label: "Schema + Ossie + knowledge"
+    description: >
+      Adds the knowledge-layer policy docs on top of Condition C — plain-
+      language explanations of *why* each metric convention exists, for
+      questions where the reasoning behind a definition matters more than
+      the formula alone (e.g. Level 3 policy questions).
+    schema_only: true
+    context_files:
+      - semantic/retail.ossie.yaml
+      - knowledge/discount_cost_policy.md
+      - knowledge/revenue_recognition_policy.md
+      - knowledge/pricing_snapshot_policy.md
+      - knowledge/segment_attribution_policy.md
+
+  E:
+    label: "Schema + glossary + Ossie + knowledge"
+    description: >
+      Full context stack: glossary, Ossie semantic model, knowledge docs,
+      and business-priorities context. Used to test whether combining all
+      layers outperforms any single layer, or whether layers become
+      redundant/conflicting once combined.
+    schema_only: true
+    context_files:
+      - context/glossary.md
+      - semantic/retail.ossie.yaml
+      - knowledge/discount_cost_policy.md
+      - knowledge/revenue_recognition_policy.md
+      - knowledge/pricing_snapshot_policy.md
+      - knowledge/segment_attribution_policy.md
+      - context/company.yaml

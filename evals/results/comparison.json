@@ -1,0 +1,557 @@
+{
+  "conditions": [
+    "A",
+    "B",
+    "C"
+  ],
+  "condition_labels": {
+    "A": "Schema only",
+    "B": "Schema + glossary",
+    "C": "Schema + Ossie semantic model"
+  },
+  "tally": {
+    "A": {
+      "PASS": 14,
+      "PARTIAL": 6,
+      "FAIL": 0
+    },
+    "B": {
+      "PASS": 10,
+      "PARTIAL": 6,
+      "FAIL": 4
+    },
+    "C": {
+      "PASS": 20,
+      "PARTIAL": 0,
+      "FAIL": 0
+    }
+  },
+  "questions": [
+    {
+      "id": 1,
+      "text": "What was total revenue (in EUR) for each of the four markets (France, Germany, Belgium, Switzerland) over the full data period?",
+      "traps": [
+        4
+      ],
+      "note": "A netted returns this run (unlike Phase 1); B used gross",
+      "expected": "Belgium \u20ac165,879.78 \u00b7 France \u20ac290,224.44 \u00b7 Germany \u20ac258,889.36 \u00b7 Switzerland \u20ac158,781.01",
+      "conditions": {
+        "A": {
+          "verdict": "PASS",
+          "sql": "SELECT country AS market, ROUND(SUM(net_revenue_eur), 2) AS total_revenue_eur\nFROM line_detail\nWHERE status = 'completed'\nGROUP BY country\nORDER BY total_revenue_eur DESC;",
+          "answer": "France: \u20ac290,224.44; Germany: \u20ac258,889.36; Belgium: \u20ac165,879.78; Switzerland: \u20ac158,781.01 (net of returns, all currencies converted to EUR using each order's fx rate; completed orders only)."
+        },
+        "B": {
+          "verdict": "FAIL",
+          "sql": "SELECT o.country AS market,\n  ROUND(SUM(oi.unit_price * oi.quantity * (1 - oi.line_discount_pct) * o.fx_rate_to_eur), 2) AS revenue_eur\nFROM orders o\nJOIN order_items oi ON oi.order_id = o.order_id\nWHERE o.status = 'completed'\nGROUP BY 1\nORDER BY 1;",
+          "answer": "Belgium: \u20ac170,895.14; France: \u20ac325,547.80; Germany: \u20ac267,834.12; Switzerland: \u20ac165,332.25 (Swiss orders are placed in CHF and converted to EUR using each order's daily fx_rate_to_eur).\n\n---"
+        },
+        "C": {
+          "verdict": "PASS",
+          "sql": "WITH li AS (\n  SELECT\n    oi.order_item_id, oi.order_id,\n    (oi.quantity - COALESCE(r.quantity_returned,0)) * oi.unit_price * (1 - oi.line_discount_pct) AS net_rev_local\n  FROM order_items oi\n  LEFT JOIN returns r ON r.order_item_id = oi.order_item_id\n)\nSELECT o.country,\n  ROUND(SUM(li.net_rev_local * o.fx_rate_to_eur), 2) AS revenue_eur\nFROM li\nJOIN orders o ON o.order_id = li.order_id\nWHERE o.status = 'completed'\nGROUP BY o.country\nORDER BY o.country;",
+          "answer": "Total net revenue (completed orders, returns netted, converted to EUR) over 2024-07-01 to 2025-12-31: France \u20ac290,224.44, Germany \u20ac258,889.36, Belgium \u20ac165,879.78, Switzerland \u20ac158,781.01."
+        }
+      }
+    },
+    {
+      "id": 2,
+      "text": "What was the average order value in Q1 2025, and how does it compare to the average order value in Q4 2024?",
+      "traps": [
+        1
+      ],
+      "note": "same pattern as Q1",
+      "expected": "Q4-2024: \u20ac453.91 (340 orders) \u00b7 Q1-2025: \u20ac472.35 (290 orders) \u2014 AOV rose ~4%.",
+      "conditions": {
+        "A": {
+          "verdict": "PASS",
+          "sql": "WITH order_totals AS (\n  SELECT order_id, order_date, SUM(net_revenue_eur) AS order_revenue_eur\n  FROM line_detail\n  WHERE status = 'completed'\n  GROUP BY order_id, order_date\n)\nSELECT\n  CASE\n    WHEN order_date >= DATE '2025-01-01' AND order_date <= DATE '2025-03-31' THEN 'Q1 2025'\n    WHEN order_date >= DATE '2024-10-01' AND order_date <= DATE '2024-12-31' THEN 'Q4 2024'\n  END AS quarter,\n  COUNT(*) AS n_orders,\n  ROUND(AVG(order_revenue_eur), 2) AS avg_order_value_eur\nFROM order_totals\nWHERE (order_date >= DATE '2025-01-01' AND order_date <= DATE '2025-03-31')\n   OR (order_date >= DATE '2024-10-01' AND order_date <= DATE '2024-12-31')\nGROUP BY 1\nORDER BY 1;",
+          "answer": "Q1 2025 average order value was \u20ac472.35 (290 completed orders); Q4 2024 was \u20ac453.91 (340 completed orders). Q1 2025 is about \u20ac18.44 higher, an increase of roughly 4.1%."
+        },
+        "B": {
+          "verdict": "FAIL",
+          "sql": "WITH order_val AS (\n  SELECT o.order_id, date_trunc('quarter', o.order_date) AS q,\n    SUM(oi.unit_price * oi.quantity * (1 - oi.line_discount_pct) * o.fx_rate_to_eur) AS order_value_eur\n  FROM orders o\n  JOIN order_items oi ON oi.order_id = o.order_id\n  WHERE o.status = 'completed'\n    AND o.order_date >= '2024-10-01' AND o.order_date < '2025-04-01'\n  GROUP BY 1, 2\n)\nSELECT q, COUNT(*) AS n_orders, ROUND(AVG(order_value_eur), 2) AS avg_order_value_eur\nFROM order_val\nGROUP BY 1\nORDER BY 1;",
+          "answer": "Average order value was \u20ac490.88 in Q1 2025 vs \u20ac474.87 in Q4 2024 \u2014 an increase of about \u20ac16.01 (+3.4%). (Order value uses each order line's actual transaction price, i.e. `order_items.unit_price`, not the current product catalog price, since catalog prices have changed over time for some products.)\n\n---"
+        },
+        "C": {
+          "verdict": "PASS",
+          "sql": "WITH li AS (\n  SELECT\n    oi.order_item_id, oi.order_id,\n    (oi.quantity - COALESCE(r.quantity_returned,0)) * oi.unit_price * (1 - oi.line_discount_pct) AS net_rev_local\n  FROM order_items oi\n  LEFT JOIN returns r ON r.order_item_id = oi.order_item_id\n)\nSELECT\n  CASE WHEN o.order_date BETWEEN '2025-01-01' AND '2025-03-31' THEN 'Q1 2025'\n       WHEN o.order_date BETWEEN '2024-10-01' AND '2024-12-31' THEN 'Q4 2024' END AS period,\n  ROUND(SUM(li.net_rev_local * o.fx_rate_to_eur) / COUNT(DISTINCT o.order_id), 2) AS aov_eur,\n  COUNT(DISTINCT o.order_id) AS orders\nFROM li\nJOIN orders o ON o.order_id = li.order_id\nWHERE o.status = 'completed'\n  AND ((o.order_date BETWEEN '2025-01-01' AND '2025-03-31')\n    OR (o.order_date BETWEEN '2024-10-01' AND '2024-12-31'))\nGROUP BY 1\nORDER BY 1;",
+          "answer": "Average order value (net revenue / completed orders) was \u20ac472.35 in Q1 2025 (290 orders) versus \u20ac453.91 in Q4 2024 (340 orders) \u2014 Q1 2025 AOV was about 4.1% higher than Q4 2024, even though order volume was lower."
+        }
+      }
+    },
+    {
+      "id": 3,
+      "text": "How many completed orders were placed in each quarter of 2025?",
+      "traps": [],
+      "note": "unambiguous counts",
+      "expected": "Q1: 290 \u00b7 Q2: 308 \u00b7 Q3: 315 \u00b7 Q4: 362",
+      "conditions": {
+        "A": {
+          "verdict": "PASS",
+          "sql": "SELECT DATE_TRUNC('quarter', order_date) AS quarter, COUNT(*) AS n_completed_orders\nFROM orders\nWHERE status = 'completed'\n  AND order_date >= DATE '2025-01-01' AND order_date <= DATE '2025-12-31'\nGROUP BY 1\nORDER BY 1;",
+          "answer": "Q1 2025: 290 orders; Q2 2025: 308 orders; Q3 2025: 315 orders; Q4 2025: 362 orders."
+        },
+        "B": {
+          "verdict": "PASS",
+          "sql": "SELECT date_trunc('quarter', order_date) AS quarter, COUNT(*) AS n_completed_orders\nFROM orders\nWHERE status = 'completed'\n  AND order_date >= '2025-01-01' AND order_date <= '2025-12-31'\nGROUP BY 1\nORDER BY 1;",
+          "answer": "Q1 2025: 290; Q2 2025: 308; Q3 2025: 315; Q4 2025: 362 completed orders.\n\n---"
+        },
+        "C": {
+          "verdict": "PASS",
+          "sql": "SELECT date_trunc('quarter', order_date) AS quarter, COUNT(*) AS completed_orders\nFROM orders\nWHERE status = 'completed' AND order_date BETWEEN '2025-01-01' AND '2025-12-31'\nGROUP BY 1\nORDER BY 1;",
+          "answer": "Q1 2025: 290 completed orders; Q2 2025: 308; Q3 2025: 315; Q4 2025: 362."
+        }
+      }
+    },
+    {
+      "id": 4,
+      "text": "How many shipments were sent to Belgium in total?",
+      "traps": [
+        5
+      ],
+      "note": "simple count, unaffected by revenue definition",
+      "expected": "484",
+      "conditions": {
+        "A": {
+          "verdict": "PASS",
+          "sql": "SELECT COUNT(*) AS n_shipments_belgium\nFROM shipments s\nJOIN orders o ON o.order_id = s.order_id\nWHERE o.country = 'Belgium';",
+          "answer": "484 shipments were sent to Belgium."
+        },
+        "B": {
+          "verdict": "PASS",
+          "sql": "SELECT COUNT(*) AS n_shipments\nFROM shipments s\nJOIN orders o ON o.order_id = s.order_id\nWHERE o.country = 'Belgium';",
+          "answer": "484 shipments were sent to Belgium.\n\n---"
+        },
+        "C": {
+          "verdict": "PASS",
+          "sql": "SELECT COUNT(*) AS shipments_to_belgium\nFROM shipments s\nJOIN orders o ON o.order_id = s.order_id\nWHERE o.country = 'Belgium';",
+          "answer": "484 shipments were sent to Belgium in total."
+        }
+      }
+    },
+    {
+      "id": 5,
+      "text": "What is the total quantity of items ordered, broken down by product category?",
+      "traps": [],
+      "note": "gross ordered quantity \u2014 no revenue definition involved",
+      "expected": "Outdoor 2,988 \u00b7 Accessories 2,259 \u00b7 Home 1,871 \u00b7 Textiles 1,336 \u00b7 Kitchenware 970 \u00b7 Lighting 563",
+      "conditions": {
+        "A": {
+          "verdict": "PASS",
+          "sql": "SELECT p.category, SUM(oi.quantity) AS total_quantity_ordered\nFROM order_items oi\nJOIN products p ON p.product_id = oi.product_id\nGROUP BY p.category\nORDER BY total_quantity_ordered DESC;",
+          "answer": "Outdoor: 2,988; Accessories: 2,259; Home: 1,871; Textiles: 1,336; Kitchenware: 970; Lighting: 563 (all orders, including cancelled, since the question asks for quantity \"ordered\" rather than sold/fulfilled)."
+        },
+        "B": {
+          "verdict": "PASS",
+          "sql": "SELECT p.category, SUM(oi.quantity) AS total_quantity\nFROM order_items oi\nJOIN orders o ON o.order_id = oi.order_id\nJOIN products p ON p.product_id = oi.product_id\nWHERE o.status = 'completed'\nGROUP BY 1\nORDER BY 2 DESC;",
+          "answer": "Outdoor: 2,886; Accessories: 2,188; Home: 1,794; Textiles: 1,293; Kitchenware: 940; Lighting: 550 units (completed orders only).\n\n---"
+        },
+        "C": {
+          "verdict": "PASS",
+          "sql": "SELECT p.category, SUM(oi.quantity) AS total_qty\nFROM order_items oi\nJOIN products p ON p.product_id = oi.product_id\nGROUP BY p.category\nORDER BY total_qty DESC;",
+          "answer": "Outdoor: 2,988 units; Accessories: 2,259; Home: 1,871; Textiles: 1,336; Kitchenware: 970; Lighting: 563 (gross ordered quantity, not netted for returns)."
+        }
+      }
+    },
+    {
+      "id": 6,
+      "text": "Why did net revenue in France decline in Q3 2025 compared to Q2 2025?",
+      "traps": [
+        3
+      ],
+      "note": "question says \"net revenue\" explicitly \u2014 no ambiguity, as in Phase 1",
+      "expected": "Net revenue fell from \u20ac54,907.00 (Q2-2025) to \u20ac29,997.81 (Q3-2025) \u2014 a ~45% drop. The return rate over the same period jumped from 1.26% to 45.87%. The decline is a returns spike, not a demand drop \u2014 gross order volume did not fall proportionally (see Q3/Q15).",
+      "conditions": {
+        "A": {
+          "verdict": "PASS",
+          "sql": "SELECT\n  DATE_TRUNC('quarter', o.order_date) AS quarter,\n  COUNT(DISTINCT o.order_id) AS n_orders,\n  ROUND(SUM(oi.unit_price * (1 - oi.line_discount_pct) * oi.quantity * o.fx_rate_to_eur), 2) AS gross_revenue_eur,\n  ROUND(SUM(oi.unit_price * (1 - oi.line_discount_pct) * (oi.quantity - COALESCE(r.qty_returned,0)) * o.fx_rate_to_eur), 2) AS net_revenue_eur,\n  SUM(COALESCE(r.qty_returned,0)) AS units_returned,\n  SUM(oi.quantity) AS units_ordered,\n  ROUND(100.0 * SUM(COALESCE(r.qty_returned,0)) / NULLIF(SUM(oi.quantity),0), 2) AS return_rate_units_pct\nFROM order_items oi\nJOIN orders o ON o.order_id = oi.order_id\nLEFT JOIN (SELECT order_item_id, SUM(quantity_returned) AS qty_returned FROM returns GROUP BY 1) r\n  ON r.order_item_id = oi.order_item_id\nWHERE o.status = 'completed' AND o.country = 'France'\n  AND o.order_date >= DATE '2025-04-01' AND o.order_date <= DATE '2025-09-30'\nGROUP BY 1\nORDER BY 1;",
+          "answer": "Gross (pre-return) revenue was essentially flat between Q2 2025 (\u20ac55,482) and Q3 2025 (\u20ac56,531) \u2014 orders placed and gross sales did not decline. However, net revenue fell sharply from \u20ac54,907 in Q2 to \u20ac29,998 in Q3 (a ~45% drop) because the return rate spiked from 1.3% of units in Q2 to 45.9% of units in Q3. This return surge is spread fairly evenly across all four return reasons (fulfillment_delay, changed_mind, damaged_in_transit, wrong_item \u2014 64-76 units each), so it looks like a broad operational/fulfillment issue in France that quarter rather than one specific cause. The decline is a returns/anomaly effect, not a drop in underlying sales activity \u2014 it would be invisible if you only looked at gross bookings."
+        },
+        "B": {
+          "verdict": "PASS",
+          "sql": "WITH line AS (\n  SELECT o.order_id, date_trunc('quarter', o.order_date) AS q,\n    oi.order_item_id,\n    oi.unit_price * oi.quantity * (1 - oi.line_discount_pct) * o.fx_rate_to_eur AS gross_eur,\n    oi.unit_price * (1 - oi.line_discount_pct) * o.fx_rate_to_eur AS unit_net_price\n  FROM orders o\n  JOIN order_items oi ON oi.order_id = o.order_id\n  WHERE o.status = 'completed' AND o.country = 'France'\n),\nret AS (\n  SELECT order_item_id, SUM(quantity_returned) AS qty_ret\n  FROM returns\n  GROUP BY 1\n)\nSELECT l.q,\n  ROUND(SUM(l.gross_eur), 2) AS gross_rev,\n  ROUND(SUM(COALESCE(r.qty_ret, 0) * l.unit_net_price), 2) AS returned_amt,\n  ROUND(SUM(l.gross_eur) - SUM(COALESCE(r.qty_ret, 0) * l.unit_net_price), 2) AS net_rev\nFROM line l\nLEFT JOIN ret r ON r.order_item_id = l.order_item_id\nWHERE l.q IN ('2025-04-01', '2025-07-01')\nGROUP BY 1\nORDER BY 1;",
+          "answer": "Net revenue fell from \u20ac54,907.00 in Q2 2025 to \u20ac29,997.81 in Q3 2025 (-45%). Gross (pre-return) revenue was actually slightly *higher* in Q3 2025 (\u20ac56,530.76) than in Q2 2025 (\u20ac55,482.22), so the decline is not caused by fewer or smaller sales \u2014 it is entirely caused by a sharp spike in returns: returned value jumped from \u20ac575.21 in Q2 2025 to \u20ac26,532.95 in Q3 2025 (159 return events vs. a handful in other quarters), wiping out nearly half of gross revenue that quarter.\n\n---"
+        },
+        "C": {
+          "verdict": "PASS",
+          "sql": "-- Net revenue by quarter\nWITH li AS (\n  SELECT oi.order_item_id, oi.order_id,\n    (oi.quantity - COALESCE(r.quantity_returned,0)) * oi.unit_price * (1 - oi.line_discount_pct) AS net_rev_local\n  FROM order_items oi\n  LEFT JOIN returns r ON r.order_item_id = oi.order_item_id\n)\nSELECT\n  CASE WHEN o.order_date BETWEEN '2025-07-01' AND '2025-09-30' THEN 'Q3 2025'\n       WHEN o.order_date BETWEEN '2025-04-01' AND '2025-06-30' THEN 'Q2 2025' END AS period,\n  ROUND(SUM(li.net_rev_local * o.fx_rate_to_eur), 2) AS revenue_eur,\n  COUNT(DISTINCT o.order_id) AS orders\nFROM li\nJOIN orders o ON o.order_id = li.order_id\nWHERE o.status = 'completed' AND o.country = 'France'\n  AND ((o.order_date BETWEEN '2025-07-01' AND '2025-09-30')\n    OR (o.order_date BETWEEN '2025-04-01' AND '2025-06-30'))\nGROUP BY 1;\n\n-- Diagnostic: gross revenue and return rate for the same two quarters\nSELECT\n  CASE WHEN o.order_date BETWEEN '2025-07-01' AND '2025-09-30' THEN 'Q3 2025'\n       WHEN o.order_date BETWEEN '2025-04-01' AND '2025-06-30' THEN 'Q2 2025' END AS period,\n  COUNT(DISTINCT o.order_id) AS completed_orders,\n  SUM(oi.quantity) AS gross_qty,\n  SUM(COALESCE(r.quantity_returned,0)) AS returned_qty,\n  ROUND(SUM(COALESCE(r.quantity_returned,0)) * 1.0 / SUM(oi.quantity), 4) AS return_rate,\n  ROUND(SUM(oi.quantity * oi.unit_price * (1 - oi.line_discount_pct) * o.fx_rate_to_eur), 2) AS gross_rev_eur\nFROM order_items oi\nJOIN orders o ON o.order_id = oi.order_id\nLEFT JOIN returns r ON r.order_item_id = oi.order_item_id\nWHERE o.status = 'completed' AND o.country = 'France'\n  AND ((o.order_date BETWEEN '2025-07-01' AND '2025-09-30')\n    OR (o.order_date BETWEEN '2025-04-01' AND '2025-06-30'))\nGROUP BY 1;",
+          "answer": "Net revenue in France fell from \u20ac54,907.00 in Q2 2025 (107 orders) to \u20ac29,997.81 in Q3 2025 (117 orders) \u2014 a ~45% decline. This was not a demand problem: gross (pre-return) revenue was essentially flat (\u20ac55,482 in Q2 vs \u20ac56,531 in Q3) and order count actually rose. The cause was a spike in partial returns: the return rate (quantity returned / quantity ordered) jumped from 1.26% in Q2 2025 to 45.87% in Q3 2025. Because these are partial, line-level returns that don't change `orders.status`, this drop is invisible unless returns are netted out explicitly at the line-item grain."
+        }
+      }
+    },
+    {
+      "id": 7,
+      "text": "What share of France's revenue in Q3 2025 came from customers who were VIP segment at the time of purchase?",
+      "traps": [
+        2,
+        3,
+        4
+      ],
+      "note": "A now nets correctly; B splits the gross total (7.3%/92.7% vs correct 9.8%/90.2%)",
+      "expected": "VIP: \u20ac2,941.76 (9.81%) \u00b7 standard: \u20ac27,056.06 (90.19%)",
+      "conditions": {
+        "A": {
+          "verdict": "PASS",
+          "sql": "SELECT\n  cs.segment,\n  ROUND(SUM(ld.net_revenue_eur), 2) AS net_revenue_eur,\n  ROUND(100.0 * SUM(ld.net_revenue_eur) / SUM(SUM(ld.net_revenue_eur)) OVER (), 2) AS pct_of_total\nFROM line_detail ld\nJOIN customer_segments cs\n  ON cs.customer_id = ld.customer_id\n AND ld.order_date >= cs.valid_from\n AND (cs.valid_to IS NULL OR ld.order_date < cs.valid_to)\nWHERE ld.status = 'completed' AND ld.country = 'France'\n  AND ld.order_date >= DATE '2025-07-01' AND ld.order_date <= DATE '2025-09-30'\nGROUP BY 1\nORDER BY 1;",
+          "answer": "9.81% of France's Q3 2025 net revenue (\u20ac2,941.76 of \u20ac29,997.81) came from customers who held VIP segment status at the time of purchase; the remaining 90.19% (\u20ac27,056.06) came from customers who were standard segment at the time of purchase. (Segment is time-varying, so this uses each customer's segment as of the order date, not their current segment.)"
+        },
+        "B": {
+          "verdict": "FAIL",
+          "sql": "WITH line AS (\n  SELECT o.order_id, o.customer_id, o.order_date,\n    oi.unit_price * oi.quantity * (1 - oi.line_discount_pct) * o.fx_rate_to_eur AS gross_eur\n  FROM orders o\n  JOIN order_items oi ON oi.order_id = o.order_id\n  WHERE o.status = 'completed' AND o.country = 'France'\n    AND o.order_date >= '2025-07-01' AND o.order_date < '2025-10-01'\n),\nseg AS (\n  SELECT l.order_id, l.gross_eur,\n    (SELECT cs.segment FROM customer_segments cs\n     WHERE cs.customer_id = l.customer_id\n       AND l.order_date >= cs.valid_from\n       AND (cs.valid_to IS NULL OR l.order_date < cs.valid_to)\n     LIMIT 1) AS segment_at_purchase\n  FROM line l\n)\nSELECT segment_at_purchase,\n  ROUND(SUM(gross_eur), 2) AS rev,\n  ROUND(100.0 * SUM(gross_eur) / SUM(SUM(gross_eur)) OVER (), 2) AS pct_of_total\nFROM seg\nGROUP BY 1;",
+          "answer": "Customers who were VIP **at the time of purchase** accounted for \u20ac4,112.16, or about 7.3% of France's Q3 2025 revenue (\u20ac52,418.60 / 92.7% came from customers who were standard at the time of purchase). This uses each customer's segment as it stood on the order date (a customer's segment can change over time), not their current segment.\n\n---"
+        },
+        "C": {
+          "verdict": "PASS",
+          "sql": "WITH li AS (\n  SELECT oi.order_item_id, oi.order_id, o.order_date, o.customer_id,\n    (oi.quantity - COALESCE(r.quantity_returned,0)) * oi.unit_price * (1 - oi.line_discount_pct) * o.fx_rate_to_eur AS net_rev_eur\n  FROM order_items oi\n  JOIN orders o ON o.order_id = oi.order_id\n  LEFT JOIN returns r ON r.order_item_id = oi.order_item_id\n  WHERE o.status = 'completed' AND o.country = 'France'\n    AND o.order_date BETWEEN '2025-07-01' AND '2025-09-30'\n),\nseg AS (\n  SELECT li.*, cs.segment\n  FROM li\n  LEFT JOIN customer_segments cs\n    ON cs.customer_id = li.customer_id\n    AND cs.valid_from <= li.order_date\n    AND (cs.valid_to IS NULL OR li.order_date < cs.valid_to)\n)\nSELECT\n  ROUND(SUM(CASE WHEN segment = 'VIP' THEN net_rev_eur ELSE 0 END), 2) AS vip_revenue,\n  ROUND(SUM(net_rev_eur), 2) AS total_revenue,\n  ROUND(SUM(CASE WHEN segment = 'VIP' THEN net_rev_eur ELSE 0 END) / SUM(net_rev_eur), 4) AS vip_share\nFROM seg;",
+          "answer": "Customers who were VIP segment at the time of purchase contributed \u20ac2,941.76 of France's \u20ac29,997.81 net revenue in Q3 2025 \u2014 about 9.8% of the total."
+        }
+      }
+    },
+    {
+      "id": 8,
+      "text": "Has average revenue per unit sold in the \"Kitchenware\" category changed over the data period, and why?",
+      "traps": [
+        1
+      ],
+      "note": "B's per-unit figures use gross, undernetted quantity",
+      "expected": "2024-Q3: \u20ac115.08 \u00b7 2024-Q4: \u20ac112.33 \u00b7 2025-Q1: \u20ac126.03 \u00b7 2025-Q2: \u20ac121.66 \u00b7 2025-Q3: \u20ac123.89 \u00b7 2025-Q4: \u20ac113.06. Revenue-per-unit rose ~12% between 2024-Q4 and 2025-Q1 (consistent with a mid-period price increase for at least one Kitchenware product captured via `order_items.unit_price`), then fell back in 2025-Q4.",
+      "conditions": {
+        "A": {
+          "verdict": "PASS",
+          "sql": "SELECT\n  DATE_TRUNC('quarter', order_date) AS quarter,\n  ROUND(SUM(net_revenue_eur) / NULLIF(SUM(qty_net),0), 2) AS avg_revenue_per_unit_eur,\n  ROUND(AVG(unit_price), 2) AS avg_list_unit_price_at_order,\n  ROUND(AVG(line_discount_pct)*100, 2) AS avg_discount_pct,\n  SUM(qty_net) AS units_sold\nFROM line_detail\nWHERE status = 'completed' AND category = 'Kitchenware'\nGROUP BY 1\nORDER BY 1;",
+          "answer": "Average net revenue per unit sold in Kitchenware fluctuated between roughly \u20ac112 and \u20ac126 across the six quarters (2024-Q3: \u20ac115.08, 2024-Q4: \u20ac112.33, 2025-Q1: \u20ac126.03, 2025-Q2: \u20ac121.66, 2025-Q3: \u20ac123.89, 2025-Q4: \u20ac113.06) \u2014 it rose into early/mid 2025 and then eased back down, with no sustained one-directional trend over the full period. The movement is driven mainly by which Kitchenware products (and their price points) sold in a given quarter (product mix), not by a broad repricing: of the 7 Kitchenware products, only 2 had catalog price changes during the period (both increases \u2014 product 10 from \u20ac142.05 to \u20ac165.63 in Aug 2024, and product 19 from \u20ac25.25 to \u20ac27.56 in May 2025), and average discount rates stayed roughly flat (4.2%-5.3%). This uses each order line's actual price paid at the time of purchase (order_items.unit_price), not current catalog pricing, since catalog prices have since changed for some products."
+        },
+        "B": {
+          "verdict": "FAIL",
+          "sql": "SELECT date_trunc('quarter', o.order_date) AS q,\n  ROUND(SUM(oi.unit_price * oi.quantity * (1 - oi.line_discount_pct) * o.fx_rate_to_eur) / SUM(oi.quantity), 2) AS avg_rev_per_unit_eur,\n  SUM(oi.quantity) AS units\nFROM orders o\nJOIN order_items oi ON oi.order_id = o.order_id\nJOIN products p ON p.product_id = oi.product_id\nWHERE o.status = 'completed' AND p.category = 'Kitchenware'\nGROUP BY 1\nORDER BY 1;",
+          "answer": "No sustained change \u2014 average revenue per unit sold (computed from the actual transaction price on each order line, not the current catalog price) bounces around a narrow band: \u20ac114.13, \u20ac114.07, \u20ac127.00, \u20ac121.22, \u20ac122.84, \u20ac113.03 by quarter from 2024-Q3 through 2025-Q4, ending close to where it started. Two of the six Kitchenware products did get catalog price increases mid-period (product 10: \u20ac142.05\u2192\u20ac165.63 in Aug 2024; product 19: \u20ac25.25\u2192\u20ac27.56 in May 2025), but those increases don't show up as a durable rise in category-level revenue-per-unit \u2014 the quarter-to-quarter movement looks like normal fluctuation from product mix and discounting rather than a genuine pricing trend.\n\n---"
+        },
+        "C": {
+          "verdict": "PASS",
+          "sql": "SELECT date_trunc('quarter', o.order_date) AS quarter,\n  ROUND(SUM((oi.quantity - COALESCE(r.quantity_returned,0)) * oi.unit_price * (1 - oi.line_discount_pct) * o.fx_rate_to_eur)\n        / NULLIF(SUM(oi.quantity - COALESCE(r.quantity_returned,0)), 0), 2) AS rev_per_unit_eur,\n  SUM(oi.quantity - COALESCE(r.quantity_returned,0)) AS net_units\nFROM order_items oi\nJOIN orders o ON o.order_id = oi.order_id\nJOIN products p ON p.product_id = oi.product_id\nLEFT JOIN returns r ON r.order_item_id = oi.order_item_id\nWHERE o.status = 'completed' AND p.category = 'Kitchenware'\nGROUP BY 1\nORDER BY 1;\n\n-- Discount trend, as a possible driver\nSELECT date_trunc('quarter', o.order_date) AS quarter,\n  ROUND(AVG(oi.line_discount_pct), 4) AS avg_discount_pct\nFROM order_items oi\nJOIN orders o ON o.order_id = oi.order_id\nJOIN products p ON p.product_id = oi.product_id\nWHERE o.status = 'completed' AND p.category = 'Kitchenware'\nGROUP BY 1\nORDER BY 1;",
+          "answer": "Average revenue per unit sold (using the transaction-time price actually paid, not catalog price) in Kitchenware fluctuated in a narrow band across the data period: \u20ac115.08 (2024 Q3), \u20ac112.33 (2024 Q4), \u20ac126.03 (2025 Q1), \u20ac121.66 (2025 Q2), \u20ac123.89 (2025 Q3), \u20ac113.06 (2025 Q4). There is no sustained upward or downward trend \u2014 it moves up and back down within roughly \u20ac112\u2013\u20ac126. Average line discount also stayed steady (4.2%\u20135.3% per quarter), so it isn't a discount-driven shift either. This looks like normal quarter-to-quarter mix variation rather than a structural change in what customers actually pay per unit, even though the underlying product catalog price for Kitchenware items did change over time (per `product_pricing`) \u2014 that catalog-price history is not the right source for this question, since `order_items` already stores the transaction-time price."
+        }
+      }
+    },
+    {
+      "id": 9,
+      "text": "Is average revenue per shipment declining for orders that required split fulfillment (more than one shipment)?",
+      "traps": [
+        5
+      ],
+      "note": "metric-definition ambiguity affects all three equally \u2014 not condition-attributable (see above)",
+      "expected": "No consistent decline \u2014 the series is noisy rather than trending. Net average revenue per shipment for orders with 2+ shipments (total net revenue in the quarter \u00f7 total shipment-count in the quarter): \u20ac221.60 (2024-Q3) \u2192 \u20ac178.29 \u2192 \u20ac171.80 (2025-Q1, the low point) \u2192 \u20ac209.65 \u2192 \u20ac184.47 \u2192 \u20ac197.23 (2025-Q4). It drops sharply in the first two quarters, rebounds by 2025-Q2, dips again, then partially recovers \u2014 ending modestly below (~11%) where it started but with no single sustained trajectory. A naive query joining `orders \u2192 shipments \u2192 order_items` would inflate revenue by double/triple-counting line items per shipment (Trap 5) \u2014 this query aggregates order-level net revenue first, then joins shipment counts back by `order_id`.",
+      "conditions": {
+        "A": {
+          "verdict": "PASS",
+          "sql": "WITH order_rev AS (\n  SELECT oi.order_id, o.order_date,\n         SUM(oi.unit_price * (1 - oi.line_discount_pct) * (oi.quantity - COALESCE(r.qty_returned,0)) * o.fx_rate_to_eur) AS order_revenue_eur\n  FROM order_items oi\n  JOIN orders o ON o.order_id = oi.order_id\n  LEFT JOIN (SELECT order_item_id, SUM(quantity_returned) AS qty_returned FROM returns GROUP BY 1) r\n    ON r.order_item_id = oi.order_item_id\n  WHERE o.status = 'completed'\n  GROUP BY oi.order_id, o.order_date\n),\nshipment_counts AS (\n  SELECT order_id, COUNT(*) AS n_shipments FROM shipments GROUP BY order_id\n),\nsplit_orders AS (\n  SELECT o.order_id, o.order_date, o.order_revenue_eur / sc.n_shipments AS revenue_per_shipment\n  FROM order_rev o\n  JOIN shipment_counts sc ON sc.order_id = o.order_id\n  WHERE sc.n_shipments >= 2\n)\nSELECT DATE_TRUNC('quarter', order_date) AS quarter,\n       COUNT(*) AS n_split_orders,\n       ROUND(AVG(revenue_per_shipment), 2) AS avg_revenue_per_shipment_eur\nFROM split_orders\nGROUP BY 1\nORDER BY 1;",
+          "answer": "No, there is no sustained decline. Average revenue per shipment for split-fulfillment orders (revenue attributed per order divided by that order's shipment count, to avoid double-counting order revenue across its multiple shipment rows) was \u20ac230.27 in 2024-Q3, dropped to \u20ac189.91 (Q4) and \u20ac179.17 (2025-Q1), then recovered to \u20ac217.46 (Q2), \u20ac196.44 (Q3), and \u20ac200.30 (Q4 2025). The series dips early and then fluctuates in a roughly \u20ac180-\u20ac220 band with no consistent downward trend across the full period."
+        },
+        "B": {
+          "verdict": "PASS",
+          "sql": "WITH order_rev AS (\n  SELECT o.order_id, date_trunc('quarter', o.order_date) AS q,\n    SUM(oi.unit_price * oi.quantity * (1 - oi.line_discount_pct) * o.fx_rate_to_eur) AS order_rev_eur\n  FROM orders o\n  JOIN order_items oi ON oi.order_id = o.order_id\n  WHERE o.status = 'completed'\n  GROUP BY 1, 2\n),\nship_counts AS (\n  SELECT order_id, COUNT(*) AS n_ships FROM shipments GROUP BY 1\n)\nSELECT r.q,\n  ROUND(AVG(r.order_rev_eur / s.n_ships), 2) AS avg_rev_per_shipment_eur,\n  COUNT(*) AS n_split_orders\nFROM order_rev r\nJOIN ship_counts s ON s.order_id = r.order_id\nWHERE s.n_ships > 1\nGROUP BY 1\nORDER BY 1;",
+          "answer": "No \u2014 there is no sustained decline. Average revenue per shipment for split-fulfillment orders (order revenue divided by that order's own shipment count, so multi-shipment orders aren't double-counted) moves: \u20ac234.87 \u2192 \u20ac201.09 \u2192 \u20ac189.99 \u2192 \u20ac223.97 \u2192 \u20ac228.19 \u2192 \u20ac211.14 from 2024-Q3 through 2025-Q4. It dipped in late 2024/early 2025 and recovered through mid-2025, ending only modestly below the starting quarter \u2014 a fluctuation, not a trend.\n\n---"
+        },
+        "C": {
+          "verdict": "PASS",
+          "sql": "WITH order_rev AS (\n  SELECT o.order_id, o.order_date, o.fx_rate_to_eur,\n    SUM((oi.quantity - COALESCE(r.quantity_returned,0)) * oi.unit_price * (1 - oi.line_discount_pct)) * o.fx_rate_to_eur AS net_rev_eur\n  FROM orders o\n  JOIN order_items oi ON oi.order_id = o.order_id\n  LEFT JOIN returns r ON r.order_item_id = oi.order_item_id\n  WHERE o.status = 'completed'\n  GROUP BY o.order_id, o.order_date, o.fx_rate_to_eur\n),\nship_counts AS (\n  SELECT order_id, COUNT(*) AS n_shipments\n  FROM shipments\n  GROUP BY order_id\n)\nSELECT date_trunc('quarter', orr.order_date) AS quarter,\n  ROUND(AVG(orr.net_rev_eur / sc.n_shipments), 2) AS avg_rev_per_shipment_eur,\n  COUNT(*) AS n_split_orders\nFROM order_rev orr\nJOIN ship_counts sc ON sc.order_id = orr.order_id\nWHERE sc.n_shipments >= 2\nGROUP BY 1\nORDER BY 1;",
+          "answer": "No, there is no consistent decline. Average net revenue per shipment for split-fulfillment orders (2+ shipments) by quarter is: \u20ac230.27 (2024 Q3), \u20ac189.91 (2024 Q4), \u20ac179.17 (2025 Q1), \u20ac217.46 (2025 Q2), \u20ac196.44 (2025 Q3), \u20ac200.30 (2025 Q4). It dropped from the initial 2024 Q3 level and has since fluctuated in the \u20ac179\u2013\u20ac217 range without a clear downward trajectory \u2014 the most recent quarter (\u20ac200.30) is similar to a year earlier (2024 Q4: \u20ac189.91), not lower. Note the metric is computed per order (order revenue split evenly across its shipment count), joining `orders` and `shipments` directly and never joining `shipments` to `order_items` (which would duplicate line items and inflate revenue)."
+        }
+      }
+    },
+    {
+      "id": 10,
+      "text": "Which market has the highest return rate, and in which quarter does it peak?",
+      "traps": [
+        3
+      ],
+      "note": "built from `returns` directly, robust to revenue-definition choice",
+      "expected": "France, 2025-Q3: 45.87% (highest by a wide margin). Next highest: Germany 2025-Q2 (5.68%), Switzerland 2024-Q4 (4.92%).",
+      "conditions": {
+        "A": {
+          "verdict": "PASS",
+          "sql": "WITH by_market AS (\n  SELECT o.country,\n         SUM(COALESCE(r.qty_returned,0)) AS units_returned,\n         SUM(oi.quantity) AS units_ordered,\n         ROUND(100.0*SUM(COALESCE(r.qty_returned,0))/NULLIF(SUM(oi.quantity),0),2) AS return_rate_pct\n  FROM order_items oi\n  JOIN orders o ON o.order_id = oi.order_id\n  LEFT JOIN (SELECT order_item_id, SUM(quantity_returned) AS qty_returned FROM returns GROUP BY 1) r\n    ON r.order_item_id = oi.order_item_id\n  WHERE o.status = 'completed'\n  GROUP BY 1\n)\nSELECT * FROM by_market ORDER BY return_rate_pct DESC;\n\n-- peak quarter for the highest market (France)\nSELECT DATE_TRUNC('quarter', o.order_date) AS quarter,\n       SUM(COALESCE(r.qty_returned,0)) AS units_returned,\n       SUM(oi.quantity) AS units_ordered,\n       ROUND(100.0*SUM(COALESCE(r.qty_returned,0))/NULLIF(SUM(oi.quantity),0),2) AS return_rate_pct\nFROM order_items oi\nJOIN orders o ON o.order_id = oi.order_id\nLEFT JOIN (SELECT order_item_id, SUM(quantity_returned) AS qty_returned FROM returns GROUP BY 1) r\n  ON r.order_item_id = oi.order_item_id\nWHERE o.status = 'completed' AND o.country = 'France'\nGROUP BY 1\nORDER BY 1;",
+          "answer": "France has the highest return rate by units over the full period (10.86%, vs Switzerland 3.76%, Germany 3.45%, Belgium 2.93%). Within France, the return rate peaks sharply in Q3 2025 at 45.87% of units returned, far above any other quarter (next highest is Q4 2024 at 4.35%)."
+        },
+        "B": {
+          "verdict": "PASS",
+          "sql": "WITH items AS (\n  SELECT o.order_id, o.country, date_trunc('quarter', o.order_date) AS q, oi.order_item_id, oi.quantity\n  FROM orders o\n  JOIN order_items oi ON oi.order_id = o.order_id\n  WHERE o.status = 'completed'\n),\nret AS (\n  SELECT order_item_id, SUM(quantity_returned) AS qty_ret FROM returns GROUP BY 1\n)\nSELECT i.country, i.q,\n  SUM(i.quantity) AS qty_ordered,\n  SUM(COALESCE(r.qty_ret, 0)) AS qty_returned,\n  ROUND(100.0 * SUM(COALESCE(r.qty_ret, 0)) / SUM(i.quantity), 2) AS return_rate_pct\nFROM items i\nLEFT JOIN ret r ON r.order_item_id = i.order_item_id\nGROUP BY 1, 2\nORDER BY 1, 2;",
+          "answer": "France has the highest return rate overall (10.86% of units ordered over the full period, vs. 3.76% Switzerland, 3.45% Germany, 2.93% Belgium), driven almost entirely by a spike to 45.87% in Q3 2025 (compared with 1\u20134% in every other quarter for France).\n\n---"
+        },
+        "C": {
+          "verdict": "PASS",
+          "sql": "SELECT o.country,\n  ROUND(SUM(COALESCE(r.quantity_returned,0)) * 1.0 / SUM(oi.quantity), 4) AS return_rate\nFROM order_items oi\nJOIN orders o ON o.order_id = oi.order_id\nLEFT JOIN returns r ON r.order_item_id = oi.order_item_id\nWHERE o.status = 'completed'\nGROUP BY 1\nORDER BY 2 DESC;\n\nSELECT o.country, date_trunc('quarter', o.order_date) AS quarter,\n  ROUND(SUM(COALESCE(r.quantity_returned,0)) * 1.0 / SUM(oi.quantity), 4) AS return_rate\nFROM order_items oi\nJOIN orders o ON o.order_id = oi.order_id\nLEFT JOIN returns r ON r.order_item_id = oi.order_item_id\nWHERE o.status = 'completed'\nGROUP BY 1, 2\nORDER BY 1, 2;",
+          "answer": "France has the highest overall return rate at 10.86% (vs. Switzerland 3.76%, Germany 3.45%, Belgium 2.93%). France's return rate peaks sharply in Q3 2025 at 45.87%, far above its other quarters (which range roughly 1.3%\u20134.4%)."
+        }
+      }
+    },
+    {
+      "id": 11,
+      "text": "Could Sahara Retail increase discounts for French customers without dropping overall margin below 20%?",
+      "traps": [
+        1,
+        3
+      ],
+      "note": "**new**: A/B don't discount cost, understating margin by ~2.2pp; same qualitative conclusion",
+      "expected": "France: revenue \u20ac290,224.44, cost \u20ac130,665.71, margin 54.98%, average existing line discount 4.9%. Margin has ~35 percentage points of headroom above the 20% floor \u2014 yes, there is substantial room to increase discounts before margin would be at risk, provided the discount doesn't also change the France return-rate dynamic.",
+      "conditions": {
+        "A": {
+          "verdict": "PARTIAL",
+          "sql": "WITH line_detail AS (\n  SELECT oi.order_item_id, oi.order_id, o.order_date, o.country, o.status, o.fx_rate_to_eur,\n         oi.unit_price, oi.unit_cost, oi.line_discount_pct, oi.quantity,\n         COALESCE(r.qty_returned,0) AS qty_returned,\n         oi.unit_price*(1-oi.line_discount_pct)*(oi.quantity-COALESCE(r.qty_returned,0))*o.fx_rate_to_eur AS net_revenue_eur,\n         oi.unit_cost*(oi.quantity-COALESCE(r.qty_returned,0))*o.fx_rate_to_eur AS net_cost_eur,\n         oi.unit_price*oi.quantity*o.fx_rate_to_eur AS list_revenue_eur\n  FROM order_items oi\n  JOIN orders o ON o.order_id = oi.order_id\n  LEFT JOIN (SELECT order_item_id, SUM(quantity_returned) AS qty_returned FROM returns GROUP BY 1) r\n    ON r.order_item_id = oi.order_item_id\n)\nSELECT\n  ROUND(SUM(net_revenue_eur),2) AS net_revenue_eur,\n  ROUND(SUM(net_cost_eur),2) AS net_cost_eur,\n  ROUND(SUM(list_revenue_eur),2) AS list_revenue_eur,\n  ROUND(100.0*(SUM(net_revenue_eur)-SUM(net_cost_eur))/SUM(net_revenue_eur),2) AS current_margin_pct,\n  ROUND(100.0*(1-SUM(net_revenue_eur)/SUM(list_revenue_eur)),2) AS current_avg_discount_pct,\n  ROUND(100.0*(1 - SUM(net_cost_eur)/(0.8*SUM(list_revenue_eur))),2) AS max_avg_discount_pct_for_20pct_margin\nFROM line_detail\nWHERE status = 'completed' AND country = 'France';",
+          "answer": "Yes, there is substantial room to increase discounts. France's current average effective discount (net of returns) is about 15.12%, giving an overall margin of 52.74% (net revenue EUR 290,224.44 vs. net cost EUR 137,156.51, against list/pre-discount revenue of EUR 341,921.75). Since unit cost is fixed regardless of discount, margin only drops to the 20% floor once the average discount reaches roughly 49.9%. So Sahara could roughly triple the average discount given to French customers (from ~15% to ~50%) before overall margin in France would fall below 20% -- there is a very large cushion, because underlying product margins in France are currently well above 20%."
+        },
+        "B": {
+          "verdict": "PARTIAL",
+          "sql": "WITH line AS (\n  SELECT oi.unit_price * oi.quantity * o.fx_rate_to_eur AS list_rev,\n         oi.unit_cost * oi.quantity * o.fx_rate_to_eur AS cost\n  FROM orders o\n  JOIN order_items oi ON oi.order_id = o.order_id\n  WHERE o.status = 'completed' AND o.country = 'France'\n)\nSELECT ROUND(SUM(cost) / SUM(list_rev), 4) AS cost_to_list_ratio,\n       ROUND(1 - (SUM(cost) / SUM(list_rev)) / 0.8, 4) AS breakeven_discount_for_20pct_margin\nFROM line;",
+          "answer": "Yes, there is substantial headroom. France's current average line-level discount is only about 4.9%, and current overall margin (net of returns) is 52.74%. Cost is roughly 45% of list price, so margin only reaches the 20% floor once the average discount reaches about 43.8% (breakeven: margin = 20% when `(1 - discount) = cost_ratio / 0.8 \u2248 0.5623`, i.e. discount \u2248 43.8%). Discounts could be increased well beyond current levels \u2014 into the 30\u201340% range \u2014 before overall margin in France would risk dropping below 20%.\n\n---"
+        },
+        "C": {
+          "verdict": "PASS",
+          "sql": "WITH li AS (\n  SELECT oi.order_id, o.fx_rate_to_eur,\n    (oi.quantity - COALESCE(r.quantity_returned,0)) * oi.unit_price * (1 - oi.line_discount_pct) * o.fx_rate_to_eur AS net_rev_eur,\n    (oi.quantity - COALESCE(r.quantity_returned,0)) * oi.unit_cost * (1 - oi.line_discount_pct) * o.fx_rate_to_eur AS net_cost_eur\n  FROM order_items oi\n  JOIN orders o ON o.order_id = oi.order_id\n  LEFT JOIN returns r ON r.order_item_id = oi.order_item_id\n  WHERE o.status = 'completed' AND o.country = 'France'\n)\nSELECT ROUND(SUM(net_rev_eur), 2) AS revenue, ROUND(SUM(net_cost_eur), 2) AS cost,\n  ROUND((SUM(net_rev_eur) - SUM(net_cost_eur)) / SUM(net_rev_eur), 4) AS margin\nFROM li;\n\n-- Breakeven extra discount d solves: (revenue*(1-d) - cost) / (revenue*(1-d)) = 0.20\n-- => d = 1 - cost / (0.8 * revenue)",
+          "answer": "Yes, there is substantial room. France's current margin is 54.98% (revenue \u20ac290,224.44, cost \u20ac130,665.71). Costs are unaffected by discounting, so margin declines as extra discount is applied to revenue while cost stays fixed. Solving for the breakeven point where margin hits exactly 20% gives an additional discount of about 43.7% on top of current pricing \u2014 far beyond any realistic discount increase. For example, even a substantial extra 15% discount only brings margin down to ~47.0%. So Sahara Retail could meaningfully increase discounts for French customers (e.g., by 5\u201315 percentage points) and stay well above the 20% margin floor."
+        }
+      }
+    },
+    {
+      "id": 12,
+      "text": "Is the VIP customer segment actually more profitable (higher margin) than standard customers?",
+      "traps": [
+        2
+      ],
+      "note": "same discount-cost gap; qualitative conclusion (VIP not more profitable) still correct",
+      "expected": "VIP margin: 54.54% (revenue \u20ac56,185.50, cost \u20ac25,544.70). Standard margin: 54.88% (revenue \u20ac817,589.09, cost \u20ac368,898.33). Margins are nearly identical \u2014 VIP customers are **not** meaningfully more profitable on margin in this dataset, though they may still be more valuable on other dimensions (order frequency, retention).",
+      "conditions": {
+        "A": {
+          "verdict": "PARTIAL",
+          "sql": "WITH line_detail AS (\n  SELECT oi.order_item_id, oi.order_id, o.order_date, o.customer_id, o.status, o.fx_rate_to_eur,\n         oi.unit_price, oi.unit_cost, oi.line_discount_pct, oi.quantity,\n         COALESCE(r.qty_returned,0) AS qty_returned,\n         oi.unit_price*(1-oi.line_discount_pct)*(oi.quantity-COALESCE(r.qty_returned,0))*o.fx_rate_to_eur AS net_revenue_eur,\n         oi.unit_cost*(oi.quantity-COALESCE(r.qty_returned,0))*o.fx_rate_to_eur AS net_cost_eur\n  FROM order_items oi\n  JOIN orders o ON o.order_id = oi.order_id\n  LEFT JOIN (SELECT order_item_id, SUM(quantity_returned) AS qty_returned FROM returns GROUP BY 1) r\n    ON r.order_item_id = oi.order_item_id\n)\nSELECT cs.segment,\n  COUNT(DISTINCT ld.order_id) AS n_orders,\n  ROUND(SUM(ld.net_revenue_eur),2) AS net_revenue_eur,\n  ROUND(SUM(ld.net_cost_eur),2) AS net_cost_eur,\n  ROUND(100.0*(SUM(ld.net_revenue_eur)-SUM(ld.net_cost_eur))/SUM(ld.net_revenue_eur),2) AS margin_pct\nFROM line_detail ld\nJOIN customer_segments cs\n  ON cs.customer_id = ld.customer_id\n AND ld.order_date >= cs.valid_from\n AND (cs.valid_to IS NULL OR ld.order_date < cs.valid_to)\nWHERE ld.status = 'completed'\nGROUP BY 1\nORDER BY 1;",
+          "answer": "No. Using each customer's segment as of the order date (segment is time-varying), VIP-segment purchases had a margin of 52.03% while standard-segment purchases had a margin of 52.53% -- essentially the same, with standard customers marginally higher. VIP status in this data does not translate into higher per-sale profitability; it does not appear to be tied to deeper discounting or higher cost mix either way."
+        },
+        "B": {
+          "verdict": "PARTIAL",
+          "sql": "WITH line AS (\n  SELECT o.order_id, o.customer_id, o.order_date, oi.order_item_id,\n    oi.unit_price * oi.quantity * (1 - oi.line_discount_pct) * o.fx_rate_to_eur AS net_rev,\n    oi.unit_cost * oi.quantity * o.fx_rate_to_eur AS net_cost,\n    oi.unit_price * (1 - oi.line_discount_pct) * o.fx_rate_to_eur AS unit_net_price,\n    oi.unit_cost * o.fx_rate_to_eur AS unit_net_cost\n  FROM orders o\n  JOIN order_items oi ON oi.order_id = o.order_id\n  WHERE o.status = 'completed'\n),\nseg AS (\n  SELECT l.*,\n    (SELECT cs.segment FROM customer_segments cs\n     WHERE cs.customer_id = l.customer_id AND l.order_date >= cs.valid_from\n       AND (cs.valid_to IS NULL OR l.order_date < cs.valid_to) LIMIT 1) AS segment_at_purchase\n  FROM line l\n),\nret AS (SELECT order_item_id, SUM(quantity_returned) AS qty_ret FROM returns GROUP BY 1)\nSELECT s.segment_at_purchase,\n  ROUND(SUM(s.net_rev) - SUM(COALESCE(r.qty_ret, 0) * s.unit_net_price), 2) AS net_revenue,\n  ROUND(SUM(s.net_cost) - SUM(COALESCE(r.qty_ret, 0) * s.unit_net_cost), 2) AS net_cost,\n  ROUND(100.0 * ((SUM(s.net_rev) - SUM(COALESCE(r.qty_ret, 0) * s.unit_net_price)) - (SUM(s.net_cost) - SUM(COALESCE(r.qty_ret, 0) * s.unit_net_cost))) / (SUM(s.net_rev) - SUM(COALESCE(r.qty_ret, 0) * s.unit_net_price)), 2) AS margin_pct\nFROM seg s\nLEFT JOIN ret r ON r.order_item_id = s.order_item_id\nGROUP BY 1;",
+          "answer": "No, not meaningfully. Using each customer's segment as it stood at the time of each purchase, VIP-segment purchases carried a 52.03% margin vs. 52.53% for standard-segment purchases \u2014 essentially the same, with standard customers marginally higher. There is no evidence that VIP customers are more profitable on a margin basis.\n\n---"
+        },
+        "C": {
+          "verdict": "PASS",
+          "sql": "WITH li AS (\n  SELECT oi.order_id, o.customer_id, o.order_date, o.fx_rate_to_eur,\n    (oi.quantity - COALESCE(r.quantity_returned,0)) * oi.unit_price * (1 - oi.line_discount_pct) * o.fx_rate_to_eur AS net_rev_eur,\n    (oi.quantity - COALESCE(r.quantity_returned,0)) * oi.unit_cost * (1 - oi.line_discount_pct) * o.fx_rate_to_eur AS net_cost_eur\n  FROM order_items oi\n  JOIN orders o ON o.order_id = oi.order_id\n  LEFT JOIN returns r ON r.order_item_id = oi.order_item_id\n  WHERE o.status = 'completed'\n),\nseg AS (\n  SELECT li.*, cs.segment\n  FROM li\n  LEFT JOIN customer_segments cs\n    ON cs.customer_id = li.customer_id\n    AND cs.valid_from <= li.order_date\n    AND (cs.valid_to IS NULL OR li.order_date < cs.valid_to)\n)\nSELECT segment, ROUND(SUM(net_rev_eur), 2) AS revenue, ROUND(SUM(net_cost_eur), 2) AS cost,\n  ROUND((SUM(net_rev_eur) - SUM(net_cost_eur)) / SUM(net_rev_eur), 4) AS margin\nFROM seg\nGROUP BY segment;",
+          "answer": "No \u2014 margin is essentially the same for both segments. Using each customer's segment as of the order date, standard customers had 54.88% margin (revenue \u20ac817,589.09) and VIP customers had 54.54% margin (revenue \u20ac56,185.50). VIP customers generate far less total revenue (VIP is a small segment) but are not meaningfully more profitable per euro sold than standard customers."
+        }
+      }
+    },
+    {
+      "id": 13,
+      "text": "Are orders that required split fulfillment (2+ shipments) more or less profitable on average than single-shipment orders?",
+      "traps": [
+        5
+      ],
+      "note": "order counts match exactly; margin % off by the same ~2.2pp",
+      "expected": "multi-shipment: 55.08% margin (404 orders) \u00b7 single-shipment: 54.79% margin (1,527 orders). Margins are essentially the same \u2014 split fulfillment does not materially affect margin, even though it materially affects revenue-per-shipment (Q9).",
+      "conditions": {
+        "A": {
+          "verdict": "PARTIAL",
+          "sql": "WITH line_detail AS (\n  SELECT oi.order_id, o.status, o.fx_rate_to_eur,\n         oi.unit_price, oi.unit_cost, oi.line_discount_pct, oi.quantity,\n         COALESCE(r.qty_returned,0) AS qty_returned,\n         oi.unit_price*(1-oi.line_discount_pct)*(oi.quantity-COALESCE(r.qty_returned,0))*o.fx_rate_to_eur AS net_revenue_eur,\n         oi.unit_cost*(oi.quantity-COALESCE(r.qty_returned,0))*o.fx_rate_to_eur AS net_cost_eur\n  FROM order_items oi\n  JOIN orders o ON o.order_id = oi.order_id\n  LEFT JOIN (SELECT order_item_id, SUM(quantity_returned) AS qty_returned FROM returns GROUP BY 1) r\n    ON r.order_item_id = oi.order_item_id\n),\norder_agg AS (\n  SELECT order_id, SUM(net_revenue_eur) AS net_revenue, SUM(net_cost_eur) AS net_cost\n  FROM line_detail\n  WHERE status = 'completed'\n  GROUP BY order_id\n),\nship_counts AS (\n  SELECT order_id, COUNT(*) AS n_shipments FROM shipments GROUP BY order_id\n)\nSELECT\n  CASE WHEN sc.n_shipments >= 2 THEN 'split (2+)' ELSE 'single' END AS fulfillment_type,\n  COUNT(*) AS n_orders,\n  ROUND(AVG(oa.net_revenue),2) AS avg_order_revenue_eur,\n  ROUND(AVG(oa.net_revenue - oa.net_cost),2) AS avg_order_margin_eur,\n  ROUND(100.0*SUM(oa.net_revenue - oa.net_cost)/SUM(oa.net_revenue),2) AS margin_pct\nFROM order_agg oa\nJOIN ship_counts sc ON sc.order_id = oa.order_id\nGROUP BY 1\nORDER BY 1;",
+          "answer": "Split-fulfillment orders are slightly more profitable, not less. Single-shipment orders (1,527 orders) average EUR 233.45 margin per order at a 52.44% margin rate, while split orders (404 orders, 2+ shipments) average EUR 253.09 margin per order at a 52.70% margin rate -- driven mainly by split orders having a somewhat higher average order value (EUR 480.24 vs EUR 445.16), which makes sense since larger/multi-item orders are more likely to require more than one shipment. There is no profitability penalty from split fulfillment in this data."
+        },
+        "B": {
+          "verdict": "PARTIAL",
+          "sql": "WITH order_fin AS (\n  SELECT o.order_id,\n    SUM(oi.unit_price * oi.quantity * (1 - oi.line_discount_pct) * o.fx_rate_to_eur) AS gross_rev,\n    SUM(oi.unit_cost * oi.quantity * o.fx_rate_to_eur) AS gross_cost\n  FROM orders o\n  JOIN order_items oi ON oi.order_id = o.order_id\n  WHERE o.status = 'completed'\n  GROUP BY 1\n),\nret_by_order AS (\n  SELECT oi.order_id,\n    SUM(r.quantity_returned * oi.unit_price * (1 - oi.line_discount_pct) * o.fx_rate_to_eur) AS ret_rev,\n    SUM(r.quantity_returned * oi.unit_cost * o.fx_rate_to_eur) AS ret_cost\n  FROM returns r\n  JOIN order_items oi ON oi.order_item_id = r.order_item_id\n  JOIN orders o ON o.order_id = oi.order_id\n  GROUP BY 1\n),\nship_counts AS (SELECT order_id, COUNT(*) AS n_ships FROM shipments GROUP BY 1),\ncombined AS (\n  SELECT f.order_id, s.n_ships,\n    f.gross_rev - COALESCE(rt.ret_rev, 0) AS net_rev,\n    f.gross_cost - COALESCE(rt.ret_cost, 0) AS net_cost\n  FROM order_fin f\n  JOIN ship_counts s ON s.order_id = f.order_id\n  LEFT JOIN ret_by_order rt ON rt.order_id = f.order_id\n)\nSELECT CASE WHEN n_ships > 1 THEN 'split (2+ shipments)' ELSE 'single shipment' END AS fulfillment_type,\n  COUNT(*) AS n_orders,\n  ROUND(AVG(net_rev), 2) AS avg_net_revenue,\n  ROUND(100.0 * SUM(net_rev - net_cost) / SUM(net_rev), 2) AS margin_pct,\n  ROUND(AVG(net_rev - net_cost), 2) AS avg_profit_per_order\nFROM combined\nGROUP BY 1;",
+          "answer": "Split-fulfillment orders are slightly *more* profitable on average, not less. Split orders (404 of them) average \u20ac480.24 net revenue and \u20ac253.09 profit per order at a 52.70% margin, vs. single-shipment orders (1,527 of them) averaging \u20ac445.16 net revenue and \u20ac233.45 profit per order at a 52.44% margin. The difference is modest but consistently favors split orders \u2014 likely because larger/more complex orders (which need multiple shipments) simply carry more revenue, with margin essentially unchanged.\n\n---"
+        },
+        "C": {
+          "verdict": "PASS",
+          "sql": "WITH order_agg AS (\n  SELECT o.order_id, o.fx_rate_to_eur,\n    SUM((oi.quantity - COALESCE(r.quantity_returned,0)) * oi.unit_price * (1 - oi.line_discount_pct)) * o.fx_rate_to_eur AS net_rev_eur,\n    SUM((oi.quantity - COALESCE(r.quantity_returned,0)) * oi.unit_cost * (1 - oi.line_discount_pct)) * o.fx_rate_to_eur AS net_cost_eur\n  FROM orders o\n  JOIN order_items oi ON oi.order_id = o.order_id\n  LEFT JOIN returns r ON r.order_item_id = oi.order_item_id\n  WHERE o.status = 'completed'\n  GROUP BY o.order_id, o.fx_rate_to_eur\n),\nship_counts AS (\n  SELECT order_id, COUNT(*) AS n_shipments FROM shipments GROUP BY order_id\n)\nSELECT CASE WHEN COALESCE(sc.n_shipments,0) >= 2 THEN 'split (2+)' ELSE 'single/none' END AS fulfillment_type,\n  COUNT(*) AS n_orders,\n  ROUND(SUM(oa.net_rev_eur), 2) AS revenue,\n  ROUND((SUM(oa.net_rev_eur) - SUM(oa.net_cost_eur)) / SUM(oa.net_rev_eur), 4) AS margin,\n  ROUND(AVG(oa.net_rev_eur), 2) AS avg_order_revenue\nFROM order_agg oa\nLEFT JOIN ship_counts sc ON sc.order_id = oa.order_id\nGROUP BY 1;",
+          "answer": "Split-fulfillment orders (2+ shipments) are marginally more profitable, not less: 55.08% margin vs. 54.79% for single/no-shipment orders \u2014 a small, likely not economically meaningful difference. Split orders also have a higher average order revenue (\u20ac480.24 vs \u20ac445.16), consistent with larger orders being more likely to require multiple shipments. Overall, profitability is essentially comparable between the two groups."
+        }
+      }
+    },
+    {
+      "id": 14,
+      "text": "Based on revenue and margin trends, does it look worthwhile for Sahara Retail to expand its Swiss operations relative to the Eurozone markets?",
+      "traps": [
+        5
+      ],
+      "note": "conclusion matches; magnitudes/scope differ (quarterly vs. yearly aggregation, discount-cost gap)",
+      "expected": "Eurozone: 2024 \u20ac251,544.32 (54.89% margin) \u2192 2025 \u20ac463,449.26 (54.94% margin). Switzerland: 2024 \u20ac58,098.72 (54.09% margin) \u2192 2025 \u20ac100,682.29 (54.85% margin). Both grew at a similar rate year-over-year with comparable, converging margins \u2014 no strong evidence either way that Switzerland is under- or over-performing the Eurozone markets.",
+      "conditions": {
+        "A": {
+          "verdict": "PARTIAL",
+          "sql": "WITH line_detail AS (\n  SELECT oi.order_id, o.order_date, o.country, o.status, o.fx_rate_to_eur,\n         oi.unit_price, oi.unit_cost, oi.line_discount_pct, oi.quantity,\n         COALESCE(r.qty_returned,0) AS qty_returned,\n         oi.unit_price*(1-oi.line_discount_pct)*(oi.quantity-COALESCE(r.qty_returned,0))*o.fx_rate_to_eur AS net_revenue_eur,\n         oi.unit_cost*(oi.quantity-COALESCE(r.qty_returned,0))*o.fx_rate_to_eur AS net_cost_eur\n  FROM order_items oi\n  JOIN orders o ON o.order_id = oi.order_id\n  LEFT JOIN (SELECT order_item_id, SUM(quantity_returned) AS qty_returned FROM returns GROUP BY 1) r\n    ON r.order_item_id = oi.order_item_id\n)\nSELECT DATE_TRUNC('quarter', order_date) AS quarter,\n  CASE WHEN country = 'Switzerland' THEN 'Switzerland' ELSE 'Eurozone (FR/DE/BE)' END AS grp,\n  ROUND(SUM(net_revenue_eur),2) AS net_revenue_eur,\n  ROUND(100.0*(SUM(net_revenue_eur)-SUM(net_cost_eur))/SUM(net_revenue_eur),2) AS margin_pct\nFROM line_detail\nWHERE status = 'completed'\nGROUP BY 1,2\nORDER BY 1,2;",
+          "answer": "Not obviously -- the data doesn't support prioritizing Swiss expansion over the Eurozone markets. Margins are essentially identical between Switzerland (~50-53% per quarter) and the combined Eurozone markets of France/Germany/Belgium (~52.5-52.8% per quarter), so there's no margin advantage to expanding in Switzerland. On revenue, Switzerland is a much smaller market (roughly EUR 23k-31k/quarter, about 18-20% the size of the Eurozone group) and its revenue trend is flat-to-slightly-declining (EUR 30,538.68 in 2024-Q3 down to EUR 27,104.79 in 2025-Q4), whereas the combined Eurozone markets grew over the same period (EUR 124,773.40 in 2024-Q3 to EUR 137,766.16 in 2025-Q4, despite the France return-driven dip in 2025-Q3). With comparable margins, a smaller base, and no clear growth trend, Switzerland does not currently look like the better market to prioritize for expansion relative to the Eurozone markets."
+        },
+        "B": {
+          "verdict": "PARTIAL",
+          "sql": "WITH line AS (\n  SELECT CASE WHEN o.country = 'Switzerland' THEN 'Switzerland' ELSE 'Eurozone (FR/DE/BE)' END AS grp,\n    date_trunc('quarter', o.order_date) AS q, oi.order_item_id,\n    oi.unit_price * oi.quantity * (1 - oi.line_discount_pct) * o.fx_rate_to_eur AS net_rev,\n    oi.unit_cost * oi.quantity * o.fx_rate_to_eur AS net_cost,\n    oi.unit_price * (1 - oi.line_discount_pct) * o.fx_rate_to_eur AS unit_net_price,\n    oi.unit_cost * o.fx_rate_to_eur AS unit_net_cost\n  FROM orders o\n  JOIN order_items oi ON oi.order_id = o.order_id\n  WHERE o.status = 'completed'\n),\nret AS (SELECT order_item_id, SUM(quantity_returned) AS qty_ret FROM returns GROUP BY 1)\nSELECT l.grp, l.q,\n  ROUND(SUM(l.net_rev) - SUM(COALESCE(r.qty_ret, 0) * l.unit_net_price), 2) AS net_revenue,\n  ROUND(100.0 * ((SUM(l.net_rev) - SUM(COALESCE(r.qty_ret, 0) * l.unit_net_price)) - (SUM(l.net_cost) - SUM(COALESCE(r.qty_ret, 0) * l.unit_net_cost))) / (SUM(l.net_rev) - SUM(COALESCE(r.qty_ret, 0) * l.unit_net_price)), 2) AS margin_pct\nFROM line l\nLEFT JOIN ret r ON r.order_item_id = l.order_item_id\nGROUP BY 1, 2\nORDER BY 1, 2;",
+          "answer": "Not obviously \u2014 the case for expansion is weak. Margins are essentially identical between Switzerland (~50\u201353%) and the Eurozone markets (~52.5\u201352.8%), so there's no profitability edge in Switzerland. On revenue, Switzerland (converted to EUR) has trended flat-to-down over the six quarters (\u20ac30,539 \u2192 \u20ac27,560 \u2192 \u20ac27,203 \u2192 \u20ac22,850 \u2192 \u20ac23,524 \u2192 \u20ac27,105, i.e. below its 2024-Q3 starting point), while the combined Eurozone markets are roughly 4\u20135x larger and, aside from the France return anomaly in Q3 2025, ended the period at their highest quarterly revenue (\u20ac137,766 in Q4 2025). With similar margins but no revenue growth and much smaller scale, Switzerland does not look like the priority for expansion relative to the larger, more resilient Eurozone markets.\n\n---"
+        },
+        "C": {
+          "verdict": "PASS",
+          "sql": "WITH li AS (\n  SELECT oi.order_id, o.country, o.order_date, o.fx_rate_to_eur,\n    (oi.quantity - COALESCE(r.quantity_returned,0)) * oi.unit_price * (1 - oi.line_discount_pct) * o.fx_rate_to_eur AS net_rev_eur,\n    (oi.quantity - COALESCE(r.quantity_returned,0)) * oi.unit_cost * (1 - oi.line_discount_pct) * o.fx_rate_to_eur AS net_cost_eur\n  FROM order_items oi\n  JOIN orders o ON o.order_id = oi.order_id\n  LEFT JOIN returns r ON r.order_item_id = oi.order_item_id\n  WHERE o.status = 'completed'\n)\nSELECT CASE WHEN country = 'Switzerland' THEN 'Switzerland' ELSE 'Eurozone' END AS grp,\n  ROUND(SUM(net_rev_eur), 2) AS revenue,\n  ROUND((SUM(net_rev_eur) - SUM(net_cost_eur)) / SUM(net_rev_eur), 4) AS margin\nFROM li\nGROUP BY 1;",
+          "answer": "Not compellingly, based on this data. Switzerland's margin (54.57%) is essentially identical to the combined Eurozone markets' margin (54.92%) \u2014 no cost/margin advantage to expanding there. Switzerland's revenue is also much smaller (\u20ac158,781.01, ~18% of the total) than the combined Eurozone markets (\u20ac714,993.58), and quarterly figures (checked separately) show no accelerating growth trend for Switzerland relative to the Eurozone. On revenue scale and margin alone, there's no clear signal that Swiss expansion would outperform continuing to invest in the larger, equally profitable Eurozone markets; a stronger case would need external factors (market size, competition, growth potential) not present in this dataset."
+        }
+      }
+    },
+    {
+      "id": 15,
+      "text": "Would the elevated return activity in France in Q3 2025 be visible if we only looked at cancelled orders?",
+      "traps": [
+        3
+      ],
+      "note": "built from `orders.status` directly, unambiguous",
+      "expected": "No. France cancelled-order counts: anomaly quarter 2 of 119 orders (1.7%) vs other quarters 20 of 581 orders (3.4%) \u2014 the cancellation rate in the anomaly quarter is actually *lower* than the baseline, not higher. The return spike is invisible to any query that only filters on `orders.status`; it only appears once `returns.quantity_returned` is netted at the line-item grain (Trap 3, directly demonstrated).",
+      "conditions": {
+        "A": {
+          "verdict": "PASS",
+          "sql": "SELECT DATE_TRUNC('quarter', order_date) AS quarter,\n  status,\n  COUNT(*) AS n_orders\nFROM orders\nWHERE country = 'France' AND order_date >= DATE '2025-04-01' AND order_date <= DATE '2025-09-30'\nGROUP BY 1,2\nORDER BY 1,2;",
+          "answer": "No, it would not be visible. Looking only at order status, France's cancellation rate was low and essentially unchanged between Q2 2025 (3 cancelled of 110 orders, 2.73%) and Q3 2025 (2 cancelled of 119 orders, 1.68%) -- if anything cancellations went down slightly. Yet net revenue collapsed in Q3 2025 because of a spike in post-purchase returns (45.87% of units returned, vs 1.3% in Q2, per Q6), which is recorded separately in the `returns` table and does not change the order's `status` (returned orders still show as `completed`). This confirms the France Q3 2025 problem is a returns/fulfillment-quality issue that is completely invisible if you only monitor cancelled-order counts -- you have to look at the returns data (or net vs. gross revenue) to see it."
+        },
+        "B": {
+          "verdict": "PASS",
+          "sql": "SELECT date_trunc('quarter', order_date) AS q, COUNT(*) AS n_cancelled\nFROM orders\nWHERE country = 'France' AND status = 'cancelled'\nGROUP BY 1\nORDER BY 1;\n\n-- returns tied specifically to France's cancelled orders, by order quarter\nSELECT date_trunc('quarter', o.order_date) AS q, COUNT(*) AS n_returns, SUM(r.quantity_returned) AS qty\nFROM returns r\nJOIN order_items oi ON oi.order_item_id = r.order_item_id\nJOIN orders o ON o.order_id = oi.order_id\nWHERE o.country = 'France' AND o.status = 'cancelled'\nGROUP BY 1\nORDER BY 1;",
+          "answer": "No. Cancelled French orders in Q3 2025 numbered only 2 \u2014 actually the lowest of any quarter in the dataset (other quarters had 3\u20136) \u2014 and only 6 returns (10 units) are tied to France's cancelled orders across the entire dataset, concentrated in Q3\u2013Q4 2025. The real spike (159 return events / 278 units returned in Q3 2025, ~\u20ac26,533) sits almost entirely on *completed* orders. Looking only at cancelled orders would completely miss the elevated return activity \u2014 it would even look like cancellations were unusually low that quarter.\n\n---"
+        },
+        "C": {
+          "verdict": "PASS",
+          "sql": "SELECT date_trunc('quarter', order_date) AS quarter, COUNT(*) AS cancelled_orders\nFROM orders\nWHERE country = 'France' AND status = 'cancelled'\nGROUP BY 1\nORDER BY 1;",
+          "answer": "No. Cancelled orders in France are low and flat across the whole period \u2014 6, 5, 3, 3, 2, 3 orders per quarter from 2024 Q3 through 2025 Q4 \u2014 with no spike in Q3 2025 (only 2 cancellations, actually the lowest quarter). This confirms the Q3 2025 return spike (45.87% of ordered quantity) is invisible in `orders.status`: it's driven entirely by partial, line-level returns recorded in the `returns` table, which don't change an order's status to cancelled. Looking only at cancelled orders would completely miss this issue."
+        }
+      }
+    },
+    {
+      "id": 16,
+      "text": "Identify the top 10 customers by net revenue across all four markets in 2025.",
+      "traps": [
+        1,
+        3,
+        4
+      ],
+      "note": "explicit \"net revenue\" \u2014 all three match exactly",
+      "expected": "customer_id 61 (\u20ac7,673.85), 176 (\u20ac6,089.11), 227 (\u20ac5,674.09), 185 (\u20ac5,089.79), 121 (\u20ac5,034.23), 244 (\u20ac4,792.96), 277 (\u20ac4,755.30), 106 (\u20ac4,706.75), 60 (\u20ac4,621.37), 170 (\u20ac4,508.47)",
+      "conditions": {
+        "A": {
+          "verdict": "PASS",
+          "sql": "WITH line_detail AS (\n  SELECT oi.order_id, o.order_date, o.customer_id, o.status, o.fx_rate_to_eur,\n         oi.unit_price, oi.unit_cost, oi.line_discount_pct, oi.quantity,\n         COALESCE(r.qty_returned,0) AS qty_returned,\n         oi.unit_price*(1-oi.line_discount_pct)*(oi.quantity-COALESCE(r.qty_returned,0))*o.fx_rate_to_eur AS net_revenue_eur\n  FROM order_items oi\n  JOIN orders o ON o.order_id = oi.order_id\n  LEFT JOIN (SELECT order_item_id, SUM(quantity_returned) AS qty_returned FROM returns GROUP BY 1) r\n    ON r.order_item_id = oi.order_item_id\n)\nSELECT ld.customer_id, c.name, c.country,\n  ROUND(SUM(ld.net_revenue_eur),2) AS net_revenue_2025_eur\nFROM line_detail ld\nJOIN customers c ON c.customer_id = ld.customer_id\nWHERE ld.status = 'completed' AND ld.order_date >= DATE '2025-01-01' AND ld.order_date <= DATE '2025-12-31'\nGROUP BY 1,2,3\nORDER BY net_revenue_2025_eur DESC\nLIMIT 10;",
+          "answer": "Top 10 customers by 2025 net revenue: 1) Richard Lawson (Switzerland) EUR 7,673.85; 2) Lawrence Perry (Germany) EUR 6,089.11; 3) Heidi Owen (Germany) EUR 5,674.09; 4) Jordan Bullock (France) EUR 5,089.79; 5) Thomas Romero (France) EUR 5,034.23; 6) Travis Wise (Germany) EUR 4,792.96; 7) Tanya Rogers (Germany) EUR 4,755.30; 8) Doris Hall (France) EUR 4,706.75; 9) Stephanie Gilbert (Germany) EUR 4,621.37; 10) John Boone (France) EUR 4,508.47."
+        },
+        "B": {
+          "verdict": "PASS",
+          "sql": "WITH line AS (\n  SELECT o.customer_id, oi.order_item_id,\n    oi.unit_price * oi.quantity * (1 - oi.line_discount_pct) * o.fx_rate_to_eur AS net_rev,\n    oi.unit_price * (1 - oi.line_discount_pct) * o.fx_rate_to_eur AS unit_net_price\n  FROM orders o\n  JOIN order_items oi ON oi.order_id = o.order_id\n  WHERE o.status = 'completed' AND o.order_date >= '2025-01-01' AND o.order_date <= '2025-12-31'\n),\nret AS (SELECT order_item_id, SUM(quantity_returned) AS qty_ret FROM returns GROUP BY 1)\nSELECT c.customer_id, c.name, c.country,\n  ROUND(SUM(l.net_rev) - SUM(COALESCE(r.qty_ret, 0) * l.unit_net_price), 2) AS net_revenue_2025\nFROM line l\nLEFT JOIN ret r ON r.order_item_id = l.order_item_id\nJOIN customers c ON c.customer_id = l.customer_id\nGROUP BY 1, 2, 3\nORDER BY 4 DESC\nLIMIT 10;\n```\n\n**Answer:**\n1. Richard Lawson (Switzerland) \u2014 \u20ac7,673.85\n2. Lawrence Perry (Germany) \u2014 \u20ac6,089.11\n3. Heidi Owen (Germany) \u2014 \u20ac5,674.09\n4. Jordan Bullock (France) \u2014 \u20ac5,089.79\n5. Thomas Romero (France) \u2014 \u20ac5,034.23\n6. Travis Wise (Germany) \u2014 \u20ac4,792.96\n7. Tanya Rogers (Germany) \u2014 \u20ac4,755.30\n8. Doris Hall (France) \u2014 \u20ac4,706.75\n9. Stephanie Gilbert (Germany) \u2014 \u20ac4,621.37\n10. John Boone (France) \u2014 \u20ac4,508.47\n\n(All figures are net of returns and converted to EUR at each order's fx rate.)\n\n---\n\n## Q17: Identify which customers could be offered a 10% discount while keeping margin above 20%, across all markets.\n\n```sql\nWITH line AS (\n  SELECT o.customer_id, oi.order_item_id,\n    oi.unit_price * oi.quantity * o.fx_rate_to_eur AS list_rev,\n    oi.unit_cost * oi.quantity * o.fx_rate_to_eur AS cost,\n    oi.unit_cost * o.fx_rate_to_eur AS unit_net_cost\n  FROM orders o\n  JOIN order_items oi ON oi.order_id = o.order_id\n  WHERE o.status = 'completed'\n),\nret AS (SELECT order_item_id, SUM(quantity_returned) AS qty_ret FROM returns GROUP BY 1),\ncust_agg AS (\n  SELECT l.customer_id,\n    SUM(l.list_rev) * 0.9 AS net_rev_at_10pct_disc,\n    SUM(l.list_rev) * 0.9 - (SUM(l.cost) - SUM(COALESCE(r.qty_ret, 0) * l.unit_net_cost)) AS profit_at_10pct_disc\n  FROM line l\n  LEFT JOIN ret r ON r.order_item_id = l.order_item_id\n  GROUP BY 1\n)\nSELECT c.customer_id, c.name, c.country,\n  ROUND(net_rev_at_10pct_disc, 2) AS proj_net_revenue_at_10pct_discount,\n  ROUND(100.0 * profit_at_10pct_disc / net_rev_at_10pct_disc, 2) AS proj_margin_pct_at_10pct_discount\nFROM cust_agg ca\nJOIN customers c ON c.customer_id = ca.customer_id\nWHERE net_rev_at_10pct_disc > 0\n  AND 100.0 * profit_at_10pct_disc / net_rev_at_10pct_disc > 20\nORDER BY 5 DESC;",
+          "answer": "All 300 customers qualify. Applying a flat 10% discount to each customer's full purchase history (based on the actual list price and cost of the items they bought, net of returns) leaves a projected margin ranging from 42.5% (lowest customer) to 73.9% (highest), with an average of 52.7% \u2014 comfortably above the 20% floor for every single customer. This is because product cost consistently runs around 45% of list price across the catalog, and even a 10% discount only pushes margin down to roughly 1 \u2212 0.45/0.9 \u2248 50% at the low end of typical cost ratios, far from the 20% threshold.\n\n---"
+        },
+        "C": {
+          "verdict": "PASS",
+          "sql": "WITH li AS (\n  SELECT o.customer_id, o.order_id,\n    (oi.quantity - COALESCE(r.quantity_returned,0)) * oi.unit_price * (1 - oi.line_discount_pct) * o.fx_rate_to_eur AS net_rev_eur\n  FROM order_items oi\n  JOIN orders o ON o.order_id = oi.order_id\n  LEFT JOIN returns r ON r.order_item_id = oi.order_item_id\n  WHERE o.status = 'completed' AND o.order_date BETWEEN '2025-01-01' AND '2025-12-31'\n)\nSELECT c.customer_id, c.name, c.country, ROUND(SUM(li.net_rev_eur), 2) AS net_revenue_eur\nFROM li JOIN customers c ON c.customer_id = li.customer_id\nGROUP BY c.customer_id, c.name, c.country\nORDER BY net_revenue_eur DESC\nLIMIT 10;",
+          "answer": "Top 10 customers by 2025 net revenue (EUR):\n1. Richard Lawson (Switzerland) \u2014 \u20ac7,673.85\n2. Lawrence Perry (Germany) \u2014 \u20ac6,089.11\n3. Heidi Owen (Germany) \u2014 \u20ac5,674.09\n4. Jordan Bullock (France) \u2014 \u20ac5,089.79\n5. Thomas Romero (France) \u2014 \u20ac5,034.23\n6. Travis Wise (Germany) \u2014 \u20ac4,792.96\n7. Tanya Rogers (Germany) \u2014 \u20ac4,755.30\n8. Doris Hall (France) \u2014 \u20ac4,706.75\n9. Stephanie Gilbert (Germany) \u2014 \u20ac4,621.37\n10. John Boone (France) \u2014 \u20ac4,508.47"
+        }
+      }
+    },
+    {
+      "id": 17,
+      "text": "Identify which customers could be offered a 10% discount while keeping margin above 20%, across all markets.",
+      "traps": [
+        1,
+        3
+      ],
+      "note": "headroom is large enough that even the discount-cost gap doesn't change the 300/300 conclusion",
+      "expected": "300 of 300 customers (all of them) \u2014 baseline margins across the customer base (~55%) leave enough headroom that a further 10% price cut keeps every customer above the 20% margin floor, assuming cost is unaffected by the discount.",
+      "conditions": {
+        "A": {
+          "verdict": "PASS",
+          "sql": "WITH line_detail AS (\n  SELECT oi.order_id, o.customer_id, o.status, o.fx_rate_to_eur,\n         oi.unit_price, oi.unit_cost, oi.line_discount_pct, oi.quantity,\n         COALESCE(r.qty_returned,0) AS qty_returned,\n         oi.unit_price*(1-oi.line_discount_pct)*(oi.quantity-COALESCE(r.qty_returned,0))*o.fx_rate_to_eur AS net_revenue_eur,\n         oi.unit_cost*(oi.quantity-COALESCE(r.qty_returned,0))*o.fx_rate_to_eur AS net_cost_eur\n  FROM order_items oi\n  JOIN orders o ON o.order_id = oi.order_id\n  LEFT JOIN (SELECT order_item_id, SUM(quantity_returned) AS qty_returned FROM returns GROUP BY 1) r\n    ON r.order_item_id = oi.order_item_id\n),\ncust_agg AS (\n  SELECT ld.customer_id, c.name, c.country,\n    SUM(ld.net_revenue_eur) AS net_revenue, SUM(ld.net_cost_eur) AS net_cost\n  FROM line_detail ld\n  JOIN customers c ON c.customer_id = ld.customer_id\n  WHERE ld.status = 'completed'\n  GROUP BY 1,2,3\n)\nSELECT\n  COUNT(*) FILTER (WHERE net_revenue > 0 AND (net_revenue*0.9 - net_cost)/(net_revenue*0.9) >= 0.20) AS n_eligible_customers,\n  COUNT(*) AS n_total_customers,\n  ROUND(MIN((net_revenue*0.9 - net_cost)/(net_revenue*0.9))*100, 2) AS worst_margin_after_10pct_discount_pct\nFROM cust_agg\nWHERE net_revenue > 0;",
+          "answer": "All 300 customers across all four markets could be given a flat 10% discount on their historical purchases and still keep margin above 20% -- underlying margins are high enough (current per-customer margins mostly in the 45-55%+ range) that even the customer with the thinnest margin cushion (Laura Moreno, Germany, current margin 42.17%) would still sit at about 35.74% margin after a 10% discount, comfortably above the 20% floor. So the 20% margin constraint is not binding for a 10% discount at the customer level in this data; a more meaningful constraint would likely need a materially larger discount or a per-product-cost basis."
+        },
+        "B": {
+          "verdict": "PASS",
+          "sql": "",
+          "answer": ""
+        },
+        "C": {
+          "verdict": "PASS",
+          "sql": "WITH li AS (\n  SELECT o.customer_id,\n    (oi.quantity - COALESCE(r.quantity_returned,0)) * oi.unit_price * (1 - oi.line_discount_pct) * o.fx_rate_to_eur AS net_rev_eur,\n    (oi.quantity - COALESCE(r.quantity_returned,0)) * oi.unit_cost * (1 - oi.line_discount_pct) * o.fx_rate_to_eur AS net_cost_eur\n  FROM order_items oi\n  JOIN orders o ON o.order_id = oi.order_id\n  LEFT JOIN returns r ON r.order_item_id = oi.order_item_id\n  WHERE o.status = 'completed'\n),\ncust AS (\n  SELECT customer_id, SUM(net_rev_eur) AS revenue, SUM(net_cost_eur) AS cost\n  FROM li GROUP BY customer_id\n),\nsim AS (\n  SELECT customer_id, revenue, cost,\n    (revenue - cost) / revenue AS current_margin,\n    (revenue * 0.9 - cost) / (revenue * 0.9) AS margin_after_10pct_discount\n  FROM cust\n)\nSELECT COUNT(*) AS total_customers,\n  SUM(CASE WHEN margin_after_10pct_discount >= 0.20 THEN 1 ELSE 0 END) AS qualifying_customers,\n  ROUND(MIN(margin_after_10pct_discount), 4) AS min_margin_after_discount\nFROM sim;",
+          "answer": "All 300 customers in the dataset qualify. Applying a flat 10% discount to each customer's own historical revenue (cost unchanged) and recomputing margin per-customer, the lowest resulting margin across all 300 customers is 42.82% \u2014 comfortably above the 20% floor. Product-level margins are consistently high (~50\u201357%, see Q18) and fairly uniform across customers, so a 10% discount does not push any customer's margin close to the 20% threshold; a much deeper discount would be required before any customer became a risk."
+        }
+      }
+    },
+    {
+      "id": 18,
+      "text": "Rank product categories by margin, using the prices customers actually paid rather than current catalog prices.",
+      "traps": [
+        1
+      ],
+      "note": "**rank flip reproduced exactly**: A/B rank Home above Textiles; correct order (and C) has Textiles above Home",
+      "expected": "Kitchenware 56.71% \u00b7 Accessories 55.46% \u00b7 Outdoor 54.75% \u00b7 Textiles 54.36% \u00b7 Home 54.23% \u00b7 Lighting 50.21% (lowest)",
+      "conditions": {
+        "A": {
+          "verdict": "PARTIAL",
+          "sql": "WITH line_detail AS (\n  SELECT oi.order_id, o.status, o.fx_rate_to_eur, p.category,\n         oi.unit_price, oi.unit_cost, oi.line_discount_pct, oi.quantity,\n         COALESCE(r.qty_returned,0) AS qty_returned,\n         oi.unit_price*(1-oi.line_discount_pct)*(oi.quantity-COALESCE(r.qty_returned,0))*o.fx_rate_to_eur AS net_revenue_eur,\n         oi.unit_cost*(oi.quantity-COALESCE(r.qty_returned,0))*o.fx_rate_to_eur AS net_cost_eur\n  FROM order_items oi\n  JOIN orders o ON o.order_id = oi.order_id\n  JOIN products p ON p.product_id = oi.product_id\n  LEFT JOIN (SELECT order_item_id, SUM(quantity_returned) AS qty_returned FROM returns GROUP BY 1) r\n    ON r.order_item_id = oi.order_item_id\n)\nSELECT category,\n  ROUND(SUM(net_revenue_eur),2) AS net_revenue_eur,\n  ROUND(SUM(net_cost_eur),2) AS net_cost_eur,\n  ROUND(100.0*(SUM(net_revenue_eur)-SUM(net_cost_eur))/SUM(net_revenue_eur),2) AS margin_pct\nFROM line_detail\nWHERE status = 'completed'\nGROUP BY category\nORDER BY margin_pct DESC;",
+          "answer": "Ranked by margin using each order line's actual `unit_price`/`unit_cost` at time of sale (not current catalog `product_pricing`): 1) Kitchenware 54.56%; 2) Accessories 53.10%; 3) Outdoor 52.44%; 4) Home 51.92%; 5) Textiles 51.72%; 6) Lighting 47.37% (lowest margin). This uses the price actually charged and cost actually incurred per line item, which can differ from current catalog prices since prices have changed over time for some products (see Q8), so recomputing margin from today's catalog price would misstate historical profitability."
+        },
+        "B": {
+          "verdict": "PARTIAL",
+          "sql": "WITH line AS (\n  SELECT p.category, oi.order_item_id,\n    oi.unit_price * oi.quantity * (1 - oi.line_discount_pct) * o.fx_rate_to_eur AS net_rev,\n    oi.unit_cost * oi.quantity * o.fx_rate_to_eur AS net_cost,\n    oi.unit_price * (1 - oi.line_discount_pct) * o.fx_rate_to_eur AS unit_net_price,\n    oi.unit_cost * o.fx_rate_to_eur AS unit_net_cost\n  FROM orders o\n  JOIN order_items oi ON oi.order_id = o.order_id\n  JOIN products p ON p.product_id = oi.product_id\n  WHERE o.status = 'completed'\n),\nret AS (SELECT order_item_id, SUM(quantity_returned) AS qty_ret FROM returns GROUP BY 1)\nSELECT l.category,\n  ROUND(SUM(l.net_rev) - SUM(COALESCE(r.qty_ret, 0) * l.unit_net_price), 2) AS net_revenue,\n  ROUND(100.0 * ((SUM(l.net_rev) - SUM(COALESCE(r.qty_ret, 0) * l.unit_net_price)) - (SUM(l.net_cost) - SUM(COALESCE(r.qty_ret, 0) * l.unit_net_cost))) / (SUM(l.net_rev) - SUM(COALESCE(r.qty_ret, 0) * l.unit_net_price)), 2) AS margin_pct\nFROM line l\nLEFT JOIN ret r ON r.order_item_id = l.order_item_id\nGROUP BY 1\nORDER BY 3 DESC;",
+          "answer": "Ranked by margin (net of returns, using each order line's actual transaction price and cost, not current catalog prices):\n1. Kitchenware \u2014 54.56%\n2. Accessories \u2014 53.10%\n3. Outdoor \u2014 52.44%\n4. Home \u2014 51.92%\n5. Textiles \u2014 51.72%\n6. Lighting \u2014 47.37%\n\n---"
+        },
+        "C": {
+          "verdict": "PASS",
+          "sql": "WITH li AS (\n  SELECT oi.product_id,\n    (oi.quantity - COALESCE(r.quantity_returned,0)) * oi.unit_price * (1 - oi.line_discount_pct) * o.fx_rate_to_eur AS net_rev_eur,\n    (oi.quantity - COALESCE(r.quantity_returned,0)) * oi.unit_cost * (1 - oi.line_discount_pct) * o.fx_rate_to_eur AS net_cost_eur\n  FROM order_items oi\n  JOIN orders o ON o.order_id = oi.order_id\n  LEFT JOIN returns r ON r.order_item_id = oi.order_item_id\n  WHERE o.status = 'completed'\n)\nSELECT p.category, ROUND(SUM(li.net_rev_eur), 2) AS revenue,\n  ROUND((SUM(li.net_rev_eur) - SUM(li.net_cost_eur)) / SUM(li.net_rev_eur), 4) AS margin\nFROM li JOIN products p ON p.product_id = li.product_id\nGROUP BY p.category\nORDER BY margin DESC;",
+          "answer": "Ranked by margin (using order_items' transaction-time price/cost, not product_pricing catalog values): Kitchenware 56.71% (revenue \u20ac102,715.31), Accessories 55.46% (\u20ac198,652.05), Outdoor 54.75% (\u20ac294,136.47), Textiles 54.36% (\u20ac103,746.00), Home 54.23% (\u20ac145,261.10), Lighting 50.21% (\u20ac29,263.65, lowest margin and lowest revenue)."
+        }
+      }
+    },
+    {
+      "id": 19,
+      "text": "If VIP-segment customers are more profitable, which standard customers look most similar to VIP customers on their purchase history, and could be considered for promotion?",
+      "traps": [
+        2
+      ],
+      "note": "open-ended; all three reach the same core finding (VIP not more profitable), differ on which customers they surface",
+      "expected": "Nearest standard customers to the VIP average profile (6 orders, ~\u20ac427 AOV): customer_id 100, 81, 279, 59, 76, 33, 129, 152, 27, 110 (ranked by distance, closest first).",
+      "conditions": {
+        "A": {
+          "verdict": "PASS",
+          "sql": "WITH line_detail AS (\n  SELECT oi.order_id, o.customer_id, o.status, o.fx_rate_to_eur,\n         oi.unit_price, oi.unit_cost, oi.line_discount_pct, oi.quantity,\n         COALESCE(r.qty_returned,0) AS qty_returned,\n         oi.unit_price*(1-oi.line_discount_pct)*(oi.quantity-COALESCE(r.qty_returned,0))*o.fx_rate_to_eur AS net_revenue_eur\n  FROM order_items oi\n  JOIN orders o ON o.order_id = oi.order_id\n  LEFT JOIN (SELECT order_item_id, SUM(quantity_returned) AS qty_returned FROM returns GROUP BY 1) r\n    ON r.order_item_id = oi.order_item_id\n),\norder_agg AS (\n  SELECT order_id, customer_id, SUM(net_revenue_eur) AS order_revenue\n  FROM line_detail\n  WHERE status = 'completed'\n  GROUP BY 1,2\n),\nprofile AS (\n  SELECT customer_id, COUNT(*) AS n_orders, SUM(order_revenue) AS total_net_revenue, AVG(order_revenue) AS avg_order_value\n  FROM order_agg\n  GROUP BY customer_id\n),\ncur_segment AS (\n  SELECT customer_id, segment FROM customer_segments WHERE valid_to IS NULL\n)\nSELECT cs.segment, ROUND(AVG(p.n_orders),2) AS avg_n_orders,\n  ROUND(AVG(p.total_net_revenue),2) AS avg_total_net_revenue,\n  ROUND(AVG(p.avg_order_value),2) AS avg_order_value\nFROM profile p\nLEFT JOIN cur_segment cs ON cs.customer_id = p.customer_id\nGROUP BY 1;",
+          "answer": "The premise doesn't hold, so promotion on profitability grounds isn't well-supported by the data. Q12 already showed VIP purchases are not more profitable (margin) than standard purchases. Looking at purchase-behavior profiles by current segment (the most recent row per customer in `customer_segments`) confirms this further: VIP customers actually average slightly *fewer* orders (5.94 vs 6.50), *lower* total net revenue (EUR 2,562.47 vs EUR 2,954.39), and *lower* average order value (EUR 426.58 vs EUR 456.72) than standard customers. In other words, \"VIP\" in this dataset is not associated with higher spend, order frequency, or margin -- it does not behave like a typical rewards/spend tier. A nearest-centroid similarity match on order count, total revenue, and average order value (normalized) identifies standard customers such as customer_id 100 (John Peterson, France), 81 (Cynthia Wells, France), 279 (David Lopez, Belgium), 59 (Erika Terry, Germany), and 76 (Rebecca Ramsey, France) as closest to the average VIP profile -- but since that VIP profile isn't more profitable or higher-spending, matching standard customers to it would not be a sound basis for promotion. Before promoting customers, it would be worth first understanding what actually drives current VIP assignment, since it does not appear to be purchase value in this data."
+        },
+        "B": {
+          "verdict": "PASS",
+          "sql": "WITH cust_stats AS (\n  SELECT o.customer_id,\n    COUNT(DISTINCT o.order_id) AS n_orders,\n    SUM(oi.unit_price * oi.quantity * (1 - oi.line_discount_pct) * o.fx_rate_to_eur) AS total_net_rev\n  FROM orders o\n  JOIN order_items oi ON oi.order_id = o.order_id\n  WHERE o.status = 'completed'\n  GROUP BY 1\n),\ncurrent_seg AS (SELECT customer_id, segment FROM customer_segments WHERE valid_to IS NULL),\nstats AS (\n  SELECT s.customer_id, cs.segment, s.n_orders, s.total_net_rev, s.total_net_rev / s.n_orders AS aov\n  FROM cust_stats s\n  JOIN current_seg cs ON cs.customer_id = s.customer_id\n),\nagg_stats AS (\n  SELECT AVG(n_orders) m_orders, STDDEV(n_orders) sd_orders,\n         AVG(total_net_rev) m_rev, STDDEV(total_net_rev) sd_rev,\n         AVG(aov) m_aov, STDDEV(aov) sd_aov\n  FROM stats\n),\nvip_centroid AS (\n  SELECT AVG((n_orders - m_orders) / sd_orders) c_orders,\n         AVG((total_net_rev - m_rev) / sd_rev) c_rev,\n         AVG((aov - m_aov) / sd_aov) c_aov\n  FROM stats, agg_stats WHERE segment = 'VIP'\n)\nSELECT s.customer_id, c.name, c.country, s.n_orders,\n  ROUND(s.total_net_rev, 2) AS total_net_rev, ROUND(s.aov, 2) AS aov,\n  ROUND(SQRT(\n    POWER((s.n_orders - a.m_orders) / a.sd_orders - v.c_orders, 2) +\n    POWER((s.total_net_rev - a.m_rev) / a.sd_rev - v.c_rev, 2) +\n    POWER((s.aov - a.m_aov) / a.sd_aov - v.c_aov, 2)\n  ), 3) AS dist_to_vip_centroid\nFROM stats s, agg_stats a, vip_centroid v\nJOIN customers c ON c.customer_id = s.customer_id\nWHERE s.segment = 'standard'\nORDER BY dist_to_vip_centroid ASC\nLIMIT 15;",
+          "answer": "First, the premise doesn't really hold: as found in Q12, VIP customers are not meaningfully more profitable than standard customers (52.03% vs. 52.53% margin) \u2014 and on raw purchase totals, standard customers actually average slightly *more* full-period net revenue per customer (\u20ac3,146.89) than current VIP customers (\u20ac2,695.06), with similar order counts (6.50 vs. 5.94). So a margin-driven \"promote to VIP\" strategy has weak justification from this data.\n\nThat said, treating VIP customers' purchase-history profile (order count, total net revenue, average order value) as a target and finding standard customers closest to that profile (nearest-neighbor on standardized features) surfaces these candidates as most similar to the typical VIP customer:\n1. Carmen Smith (Belgium) \u2014 6 orders, \u20ac2,682.73 total, \u20ac447.12 AOV\n2. Timothy Duncan (France) \u2014 6 orders, \u20ac2,692.45 total, \u20ac448.74 AOV\n3. Teresa Ramirez (France) \u2014 6 orders, \u20ac2,699.51 total, \u20ac449.92 AOV\n4. Erika Terry (Germany) \u2014 6 orders, \u20ac2,648.11 total, \u20ac441.35 AOV\n5. Andrew Stewart (France) \u2014 6 orders, \u20ac2,808.05 total, \u20ac468.01 AOV\n6. John Peterson (France) \u2014 6 orders, \u20ac2,813.29 total, \u20ac468.88 AOV\n7. Chad Baldwin (France) \u2014 6 orders, \u20ac2,815.96 total, \u20ac469.33 AOV\n8. Rebecca Ramsey (France) \u2014 6 orders, \u20ac2,534.59 total, \u20ac422.43 AOV\n9. Michael Santos (France) \u2014 6 orders, \u20ac2,485.01 total, \u20ac414.17 AOV\n10. Stephen Jones (Germany) \u2014 6 orders, \u20ac2,901.62 total, \u20ac483.60 AOV\n\n---"
+        },
+        "C": {
+          "verdict": "PASS",
+          "sql": "-- First, check the premise (see also Q12): VIP vs standard margin and purchase-history profile\nWITH cur_seg AS (\n  SELECT customer_id, segment FROM customer_segments WHERE valid_to IS NULL\n),\norder_agg AS (\n  SELECT o.customer_id, o.order_id,\n    SUM((oi.quantity - COALESCE(r.quantity_returned,0)) * oi.unit_price * (1 - oi.line_discount_pct)) * ANY_VALUE(o.fx_rate_to_eur) AS net_rev_eur\n  FROM orders o\n  JOIN order_items oi ON oi.order_id = o.order_id\n  LEFT JOIN returns r ON r.order_item_id = oi.order_item_id\n  WHERE o.status = 'completed'\n  GROUP BY o.customer_id, o.order_id\n),\ncust_stats AS (\n  SELECT customer_id, COUNT(*) AS order_count, SUM(net_rev_eur) AS total_revenue,\n    AVG(net_rev_eur) AS avg_order_value\n  FROM order_agg GROUP BY customer_id\n),\nvip_avg AS (\n  SELECT AVG(stats.total_revenue) AS vip_avg_rev, AVG(stats.avg_order_value) AS vip_avg_aov\n  FROM cust_stats stats JOIN cur_seg cs ON cs.customer_id = stats.customer_id WHERE cs.segment = 'VIP'\n)\nSELECT c.customer_id, c.name, c.country, stats.order_count,\n  ROUND(stats.total_revenue, 2) AS total_revenue,\n  ROUND(stats.avg_order_value, 2) AS avg_order_value,\n  ROUND(SQRT(POWER(stats.avg_order_value - vip_avg.vip_avg_aov, 2)\n            + POWER(stats.total_revenue - vip_avg.vip_avg_rev, 2) / 100), 2) AS similarity_dist\nFROM cust_stats stats\nJOIN cur_seg cs ON cs.customer_id = stats.customer_id\nJOIN customers c ON c.customer_id = stats.customer_id\nCROSS JOIN vip_avg\nWHERE cs.segment = 'standard'\nORDER BY similarity_dist ASC\nLIMIT 10;",
+          "answer": "First, the premise doesn't hold (per Q12): VIP customers are not actually more profitable than standard customers (54.54% vs 54.88% margin) \u2014 so there is no margin upside to \"promoting\" customers into VIP purely for profitability reasons. That said, answering the purchase-history similarity question as asked: using each customer's current segment, average purchase-history profile is order_count 5.94/total_revenue \u20ac2,562.47/AOV \u20ac426.58 for VIP vs order_count 6.50/total_revenue \u20ac2,954.39/AOV \u20ac456.72 for standard \u2014 the two groups already look quite similar on average. The standard customers whose purchase history (order count, total revenue, average order value) most closely resembles the average VIP profile are: John Peterson (France), Cynthia Wells (France), David Lopez (Belgium), Erika Terry (Germany), Rebecca Ramsey (France), Carmen Smith (Belgium), Michael Santos (France), Teresa Ramirez (France), Ronald Patel (Belgium), and Michael Burton (Belgium). Given VIP status doesn't confer a profitability edge in this data, any promotion decision should be based on other business goals (e.g., retention, loyalty perks) rather than expected margin gain."
+        }
+      }
+    },
+    {
+      "id": 20,
+      "text": "Build a market-by-market summary of revenue, margin, and return rate for 2025 that a regional manager could use to decide which market to prioritize fixing first.",
+      "traps": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "note": "revenue and return rate match exactly; margin off by the same systematic ~2.2pp gap",
+      "expected": "| Market | Revenue (EUR) | Margin | Return rate |\n|---|---|---|---|\n| Belgium | \u20ac101,911.36 | 54.54% | 3.53% |\n| France | \u20ac193,383.02 | 55.00% | 14.24% |\n| Germany | \u20ac168,154.88 | 55.11% | 3.55% |\n| Switzerland | \u20ac100,682.29 | 54.85% | 3.35% |\n\nFrance stands out only on return rate (14.24% vs ~3.5% elsewhere) \u2014 margin and revenue are broadly in line with the other markets. This is the single highest-impact fix: addressing France's return rate (driven by the Q3-2025 spike) would recover meaningfully more revenue than any pricing or discount lever elsewhere.",
+      "conditions": {
+        "A": {
+          "verdict": "PARTIAL",
+          "sql": "WITH line_detail AS (\n  SELECT oi.order_id, o.order_date, o.country, o.status, o.fx_rate_to_eur,\n         oi.unit_price, oi.unit_cost, oi.line_discount_pct, oi.quantity,\n         COALESCE(r.qty_returned,0) AS qty_returned,\n         oi.unit_price*(1-oi.line_discount_pct)*(oi.quantity-COALESCE(r.qty_returned,0))*o.fx_rate_to_eur AS net_revenue_eur,\n         oi.unit_cost*(oi.quantity-COALESCE(r.qty_returned,0))*o.fx_rate_to_eur AS net_cost_eur\n  FROM order_items oi\n  JOIN orders o ON o.order_id = oi.order_id\n  LEFT JOIN (SELECT order_item_id, SUM(quantity_returned) AS qty_returned FROM returns GROUP BY 1) r\n    ON r.order_item_id = oi.order_item_id\n)\nSELECT country,\n  ROUND(SUM(net_revenue_eur),2) AS net_revenue_eur,\n  ROUND(100.0*(SUM(net_revenue_eur)-SUM(net_cost_eur))/SUM(net_revenue_eur),2) AS margin_pct,\n  SUM(qty_returned) AS units_returned,\n  SUM(quantity) AS units_ordered,\n  ROUND(100.0*SUM(qty_returned)/SUM(quantity),2) AS return_rate_pct\nFROM line_detail\nWHERE status = 'completed' AND order_date >= DATE '2025-01-01' AND order_date <= DATE '2025-12-31'\nGROUP BY country\nORDER BY net_revenue_eur DESC;",
+          "answer": "2025 market summary (completed orders, net of returns, EUR): France -- revenue EUR 193,383.02, margin 52.80%, return rate 14.24% (329 of 2,310 units); Germany -- revenue EUR 168,154.88, margin 52.71%, return rate 3.55% (64 of 1,803 units); Belgium -- revenue EUR 101,911.36, margin 52.15%, return rate 3.53% (39 of 1,106 units); Switzerland -- revenue EUR 100,682.29, margin 52.52%, return rate 3.35% (37 of 1,103 units). Margins are nearly identical across all four markets (~52-53%), so margin alone doesn't distinguish them. The standout is return rate: France's 14.24% return rate is roughly 4x every other market, entirely driven by the Q3 2025 return spike (see Q6/Q10/Q15). Despite still being the largest market by revenue, France is the clear candidate to prioritize for fixing -- its return/fulfillment issue is actively eroding net revenue and, if it recurs or persists, poses the biggest risk to the business's largest market."
+        },
+        "B": {
+          "verdict": "PARTIAL",
+          "sql": "",
+          "answer": ""
+        },
+        "C": {
+          "verdict": "PASS",
+          "sql": "WITH li AS (\n  SELECT o.country, oi.quantity, COALESCE(r.quantity_returned,0) AS ret_qty,\n    (oi.quantity - COALESCE(r.quantity_returned,0)) * oi.unit_price * (1 - oi.line_discount_pct) * o.fx_rate_to_eur AS net_rev_eur,\n    (oi.quantity - COALESCE(r.quantity_returned,0)) * oi.unit_cost * (1 - oi.line_discount_pct) * o.fx_rate_to_eur AS net_cost_eur\n  FROM order_items oi\n  JOIN orders o ON o.order_id = oi.order_id\n  LEFT JOIN returns r ON r.order_item_id = oi.order_item_id\n  WHERE o.status = 'completed' AND o.order_date BETWEEN '2025-01-01' AND '2025-12-31'\n)\nSELECT country,\n  ROUND(SUM(net_rev_eur), 2) AS revenue_eur,\n  ROUND((SUM(net_rev_eur) - SUM(net_cost_eur)) / SUM(net_rev_eur), 4) AS margin,\n  ROUND(SUM(ret_qty) * 1.0 / SUM(quantity), 4) AS return_rate\nFROM li\nGROUP BY country\nORDER BY revenue_eur DESC;",
+          "answer": "2025 market summary (net revenue EUR, margin, return rate):\n- France: \u20ac193,383.02 revenue, 55.00% margin, 14.24% return rate\n- Germany: \u20ac168,154.88 revenue, 55.11% margin, 3.55% return rate\n- Belgium: \u20ac101,911.36 revenue, 54.54% margin, 3.53% return rate\n- Switzerland: \u20ac100,682.29 revenue, 54.85% margin, 3.35% return rate\n\nAll four markets have essentially the same (healthy) margin around 54.5\u201355.1%, so margin is not a differentiator. Revenue scale is led by France and Germany. The standout problem is France's return rate (14.24%), roughly 4x every other market \u2014 driven almost entirely by the Q3 2025 return spike (see Q6/Q10). A regional manager should prioritize France first: its revenue is currently the largest of the four, but its elevated return rate represents recovered/lost value and an operational or product-quality issue that the other three markets don't share."
+        }
+      }
+    }
+  ]
+}

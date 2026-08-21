@@ -1,0 +1,61 @@
+%%{init: {"theme": "neutral", "themeVariables": {"fontSize": "15px"}}}%%
+erDiagram
+    customers ||--o{ orders : places
+    customers ||--o{ customer_segments : "TRAP 2: point-in-time, not 1:1 - filter valid_from/valid_to at order_date, never join on customer_id alone"
+    orders ||--o{ order_items : contains
+    orders ||--o{ shipments : "TRAP 5: fan-out - NEVER join shipments to compute line-item or revenue metrics"
+    products ||--o{ order_items : "sold via"
+    products ||--o{ product_pricing : "TRAP 1: point-in-time - do NOT use for revenue/margin, price is already snapshotted on order_items"
+    order_items ||--o{ returns : "TRAP 3: nullable, nets at line grain, does NOT change orders.status"
+
+    customers {
+        int customer_id PK
+        string country
+        date signup_date
+    }
+    customer_segments {
+        int customer_id FK
+        string segment "standard or VIP"
+        date valid_from
+        date valid_to "NULL = current"
+    }
+    orders {
+        int order_id PK
+        int customer_id FK
+        date order_date
+        string country
+        string currency
+        decimal fx_rate_to_eur "TRAP 4: convert at transaction time, CHF market"
+        string status "completed or cancelled only"
+    }
+    order_items {
+        int order_item_id PK
+        int order_id FK
+        int product_id FK
+        int quantity
+        decimal unit_price "price actually paid - use this, not product_pricing"
+        decimal unit_cost "discount reduces cost too, not just revenue - see knowledge/discount_cost_policy.md"
+        decimal line_discount_pct
+    }
+    products {
+        int product_id PK
+        string category
+    }
+    product_pricing {
+        int product_id FK
+        decimal unit_price
+        decimal unit_cost
+        date valid_from
+        date valid_to
+    }
+    returns {
+        int return_id PK
+        int order_item_id FK
+        int quantity_returned
+        date return_date
+    }
+    shipments {
+        int shipment_id PK
+        int order_id FK
+        string carrier
+    }
